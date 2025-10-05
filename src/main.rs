@@ -29,18 +29,28 @@ fn main() -> Result<(), Box<dyn Error>> {
     let overlay_width = screen_width / 2;
     let overlay_height = screen_height / 2;
 
-    // Center the overlay on the screen
-    let overlay_x = (screen_width - overlay_width) / 2;
-    let overlay_y = (screen_height - overlay_height) / 2;
-
     // Create configuration with calculated dimensions
     let config = OverlayConfig::new()
-        .with_position(overlay_x as i16, overlay_y as i16)
+        .with_position(100, 100)
         .with_size(overlay_width, overlay_height)
         .with_color(0x801c1c1c); // 50% transparent gray
 
-    // Initialize renderer
-    let renderer = Renderer::new(config.clone());
+    // Open a built-in X11 font
+    let font_id = conn.generate_id()?;
+    // Try to open a common fixed-width font, fallback to "fixed" if not available
+    let font_name = b"-misc-fixed-medium-r-normal--13-120-75-75-C-70-iso8859-1";
+    if conn.open_font(font_id, font_name).is_err() {
+        // Fallback to the simple "fixed" font
+        conn.open_font(font_id, b"fixed")?;
+    }
+
+    // Initialize renderer with font and text
+    let renderer = Renderer::new(config.clone())
+        .with_font(font_id)
+        .with_text(format!(
+            "Screen: {}x{}\nOverlay: {}x{} (1/4 screen)",
+            screen_width, screen_height, overlay_width, overlay_height
+        ));
 
     // Find a 32-bit (ARGB) visual for transparency
     let visual_id = screen
@@ -145,6 +155,9 @@ fn main() -> Result<(), Box<dyn Error>> {
             }
         }
     }
+
+    // Cleanup (this code is unreachable but good practice)
+    // conn.close_font(font_id)?;
 }
 
 /// Convert a keysym to a keycode

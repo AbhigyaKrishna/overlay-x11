@@ -8,6 +8,9 @@ A Rust application that creates a translucent, click-through overlay window on L
 - **Click-Through**: All mouse and keyboard events pass through to windows below using X11 Shape extension with empty input region
 - **Always on Top**: Stays above all other windows
 - **No Window Decorations**: Uses override_redirect to avoid window manager interference
+- **Toggle Hotkey**: Press Ctrl+Alt+O to show/hide the overlay
+- **Text Rendering**: Display text on the overlay using X11 core fonts
+- **Auto-sizing**: Overlay automatically sizes to 1/4 of screen (half width × half height)
 - **Configurable**: Easy-to-use configuration API
 
 ## How It Works
@@ -46,7 +49,33 @@ let config = OverlayConfig::new()
     .with_position(100, 100)    // X, Y position
     .with_size(800, 600)        // Width, Height
     .with_color(0x80FF0000);    // ARGB color
+
+// Initialize renderer with optional font and text
+let renderer = Renderer::new(config)
+    .with_font(font_id)
+    .with_text("Hello, Overlay!".to_string());
 ```
+
+### Text Rendering
+
+To render text on the overlay:
+
+1. Open an X11 font:
+
+```rust
+let font_id = conn.generate_id()?;
+conn.open_font(font_id, b"fixed")?;
+```
+
+2. Configure the renderer with font and text:
+
+```rust
+let renderer = Renderer::new(config)
+    .with_font(font_id)
+    .with_text("Your text here".to_string());
+```
+
+The text will be rendered in white at position (20, 40) on the overlay.
 
 ### Color Format
 
@@ -74,6 +103,13 @@ cargo build
 cargo run
 ```
 
+The overlay will:
+
+- Automatically size to 1/4 of your screen (half width × half height)
+- Display screen and overlay dimensions as text
+- Be togglable with **Ctrl+Alt+O**
+- Allow all mouse and keyboard events to pass through
+
 ### Customize Configuration
 
 Edit `src/main.rs` and modify the configuration:
@@ -91,9 +127,10 @@ let config = OverlayConfig::new()
 - Rust 1.70+
 - X11 Shape extension (standard on most systems)
 
-## Exit
+## Controls
 
-Press `Ctrl+C` to close the overlay.
+- **Ctrl+Alt+O**: Toggle overlay visibility
+- **Ctrl+C**: Exit the application
 
 ## License
 
