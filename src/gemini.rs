@@ -3,7 +3,7 @@ use std::error::Error;
 use std::fs;
 
 const GEMINI_API_URL: &str =
-    "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent";
+    "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent";
 
 #[derive(Serialize)]
 struct GeminiRequest {
@@ -54,14 +54,18 @@ pub fn analyze_screenshot_data(png_data: &[u8], api_key: &str) -> Result<String,
     let base64_image = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, png_data);
 
     // Create the request with a meta prompt
-    let meta_prompt = r#"Analyze this screenshot and provide a concise summary of what you see. 
-Focus on:
-1. Main applications or windows visible
-2. Key content or activities
-3. Any notable UI elements or patterns
-4. Overall context of what the user is doing
+    let meta_prompt = r#"You are a helpful AI assistant analyzing a screenshot. Please provide a clear, concise answer to help the user understand what they're seeing. 
 
-Keep the response brief (3-5 sentences) and informative."#;
+IMPORTANT INSTRUCTIONS:
+- Keep your response under 200 words for easy reading on screen if not generating code.
+- Be specific and actionable in your analysis
+- If you see text, code, or UI elements, explain what they are and what they do
+- If you see an error or problem, suggest solutions
+- If you see a question or task, provide a helpful answer
+- Format your response with clear sections if needed
+- Use simple, direct language that's easy to read quickly
+
+What do you see in this screenshot and how can you help the user?"#;
 
     let request = GeminiRequest {
         contents: vec![Content {
@@ -100,14 +104,6 @@ Keep the response brief (3-5 sentences) and informative."#;
     }
 
     Err("No response from Gemini API".into())
-}
-
-/// Analyze a screenshot using Gemini API (deprecated - use analyze_screenshot_data)
-#[deprecated(note = "Use analyze_screenshot_data to avoid saving files")]
-pub fn analyze_screenshot(image_path: &str, api_key: &str) -> Result<String, Box<dyn Error>> {
-    // Read the image file
-    let image_data = fs::read(image_path)?;
-    analyze_screenshot_data(&image_data, api_key)
 }
 
 /// Get API key from environment variable
