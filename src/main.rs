@@ -226,7 +226,8 @@ fn main() -> Result<(), Box<dyn Error>> {
             Some(Event::KeyPress(k)) if k.detail == keycode_up && visible => {
                 // Scroll up
                 renderer.scroll_up();
-                conn.clear_area(false, win, 0, 0, 0, 0)?;
+                conn.clear_area(false, win, 0, 0, config.width, config.height)?;
+                renderer.render(&conn, win)?;
                 conn.flush()?;
                 #[cfg(debug_assertions)]
                 println!("Debug: Scrolled up");
@@ -234,7 +235,8 @@ fn main() -> Result<(), Box<dyn Error>> {
             Some(Event::KeyPress(k)) if k.detail == keycode_down && visible => {
                 // Scroll down
                 renderer.scroll_down();
-                conn.clear_area(false, win, 0, 0, 0, 0)?;
+                conn.clear_area(false, win, 0, 0, config.width, config.height)?;
+                renderer.render(&conn, win)?;
                 conn.flush()?;
                 #[cfg(debug_assertions)]
                 println!("Debug: Scrolled down");
