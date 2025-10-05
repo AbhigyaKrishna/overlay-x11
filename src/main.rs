@@ -58,7 +58,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let renderer = Renderer::new(config.clone())
         .with_font(font_id)
         .with_text(format!(
-            "Screen: {}x{}\nOverlay: {}x{} (1/4 screen)",
+            "Screen: {}x{}\nOverlay: {}x{}",
             screen_width, screen_height, overlay_width, overlay_height
         ));
 

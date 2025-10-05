@@ -57,20 +57,23 @@ impl Renderer {
             if !self.text.is_empty() {
                 let gc_text = conn.generate_id()?;
                 let white = 0xFFFFFFFFu32; // opaque white
+                let transparent = 0x00000000u32; // transparent background
                 conn.create_gc(
                     gc_text,
                     window,
-                    &CreateGCAux::new().foreground(white).font(font),
+                    &CreateGCAux::new()
+                        .foreground(white)
+                        .background(transparent)
+                        .font(font),
                 )?;
 
-                // Use poly_text8 for transparent background (instead of image_text8)
-                // Split text by newlines and render each line
+                // Draw each line of text
                 let mut y = 40;
                 for line in self.text.lines() {
                     if !line.is_empty() {
-                        conn.poly_text8(window, gc_text, 20, y, line.as_bytes())?;
+                        conn.image_text8(window, gc_text, 20, y, line.as_bytes())?;
                     }
-                    y += 20; // Line spacing
+                    y += 25; // Line spacing
                 }
                 conn.free_gc(gc_text)?;
             }
