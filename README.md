@@ -9,7 +9,8 @@ A Rust application that creates a translucent, click-through overlay window on L
 - **Always on Top**: Stays above all other windows
 - **No Window Decorations**: Uses override_redirect to avoid window manager interference
 - **Toggle Hotkey**: Press Ctrl+Alt+O to show/hide the overlay
-- **Text Rendering**: Display text on the overlay using X11 core fonts
+- **Screenshot Hotkey**: Press Ctrl+Alt+S to capture screen (excluding overlay)
+- **Text Rendering**: Display text on the overlay using X11 core fonts with outline
 - **Auto-sizing**: Overlay automatically sizes based on screen dimensions
 - **Configurable**: Easy-to-use configuration API
 - **🔒 Stealth Mode**: Undetectable by window managers, taskbars, and system monitors
@@ -222,7 +223,17 @@ systemctl --user daemon-reload
 ## Controls
 
 - **Ctrl+Alt+O**: Toggle overlay visibility
+- **Ctrl+Alt+S**: Take screenshot (overlay temporarily hidden)
 - **Ctrl+C**: Exit the application (manual mode only)
+
+## Screenshots
+
+Screenshots are saved in the current directory with timestamps:
+
+- Format: `screenshot_<timestamp>.png`
+- Overlay is automatically hidden during capture
+- Uses X11 GetImage to capture the full screen
+- Pure Rust PNG encoding (no external tools)
 
 ## Documentation
 

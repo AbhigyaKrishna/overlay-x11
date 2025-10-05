@@ -6,6 +6,7 @@ edition = "2021"
 [dependencies]
 x11rb = { version = "0.13", features = ["all-extensions"] }
 libc = "0.2"
+png = "0.17"
 
 [profile.release]
 strip = true

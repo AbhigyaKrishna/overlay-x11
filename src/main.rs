@@ -12,8 +12,9 @@ use x11rb::rust_connection::RustConnection;
 use config::OverlayConfig;
 use renderer::Renderer;
 
-// X11 keysym for 'O' key
-const XK_O: u32 = 0x006f;
+// X11 keysyms
+const XK_O: u32 = 0x006f; // 'O' key
+const XK_S: u32 = 0x0073; // 'S' key
 
 fn main() -> Result<(), Box<dyn Error>> {
     // Setup process stealth features only in release builds
@@ -141,9 +142,10 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     // Grab Ctrl+Alt+O on the root window
     let keycode_o = get_keycode(&conn, XK_O)?;
+    let keycode_s = get_keycode(&conn, XK_S)?;
     let modifiers = ModMask::CONTROL | ModMask::M1; // M1 = Alt
 
-    // Grab the key combination globally
+    // Grab the key combinations globally
     conn.grab_key(
         false,           // owner_events
         root,            // grab_window
@@ -153,13 +155,23 @@ fn main() -> Result<(), Box<dyn Error>> {
         GrabMode::ASYNC, // keyboard_mode
     )?;
 
+    // Grab Ctrl+Alt+S for screenshot
+    conn.grab_key(
+        false,
+        root,
+        modifiers,
+        keycode_s,
+        GrabMode::ASYNC,
+        GrabMode::ASYNC,
+    )?;
+
     // Initial state: visible
     let mut visible = true;
     conn.map_window(win)?;
     conn.flush()?;
 
     #[cfg(debug_assertions)]
-    println!("Debug: Overlay started. Press Ctrl+Alt+O to toggle visibility.");
+    println!("Debug: Overlay started. Press Ctrl+Alt+O to toggle, Ctrl+Alt+S to screenshot.");
 
     // Event loop (silent in release, verbose in debug)
     loop {
@@ -185,15 +197,49 @@ fn main() -> Result<(), Box<dyn Error>> {
                     conn.flush()?;
                 }
             }
+            Some(Event::KeyPress(k)) if k.detail == keycode_s => {
+                // Check if the modifiers match (Ctrl+Alt)
+                if k.state.contains(ModMask::CONTROL) && k.state.contains(ModMask::M1) {
+                    #[cfg(debug_assertions)]
+                    println!("Debug: Taking screenshot...");
+
+                    // Temporarily hide overlay if visible
+                    if visible {
+                        conn.unmap_window(win)?;
+                        conn.flush()?;
+                        std::thread::sleep(Duration::from_millis(50)); // Allow X to update
+                    }
+
+                    // Capture and save screenshot
+                    let timestamp = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)?
+                        .as_secs();
+                    let filename = format!("screenshot_{}.png", timestamp);
+
+                    match capture_and_save(&conn, root, screen_width, screen_height, &filename) {
+                        Ok(_) => {
+                            #[cfg(debug_assertions)]
+                            println!("Debug: Screenshot saved to {}", filename);
+                        }
+                        Err(e) => {
+                            #[cfg(debug_assertions)]
+                            eprintln!("Debug: Screenshot failed: {}", e);
+                        }
+                    }
+
+                    // Restore overlay if it was visible
+                    if visible {
+                        conn.map_window(win)?;
+                        conn.flush()?;
+                    }
+                }
+            }
             _ => {
                 // Small sleep to avoid busy waiting
                 std::thread::sleep(Duration::from_millis(50));
             }
         }
     }
-
-    // Cleanup (this code is unreachable but good practice)
-    // conn.close_font(font_id)?;
 }
 
 /// Convert a keysym to a keycode
@@ -215,6 +261,46 @@ fn get_keycode(conn: &RustConnection, keysym: u32) -> Result<Keycode, Box<dyn Er
     }
 
     Err(format!("Keysym 0x{:x} not found", keysym).into())
+}
+
+/// Capture the root window via GetImage and save as PNG
+fn capture_and_save(
+    conn: &RustConnection,
+    root: Window,
+    width: u16,
+    height: u16,
+    filename: &str,
+) -> Result<(), Box<dyn Error>> {
+    use std::fs::File;
+
+    // Request the full screen image in ZPixmap format
+    let img = conn
+        .get_image(ImageFormat::Z_PIXMAP, root, 0, 0, width, height, !0)?
+        .reply()?;
+    let data = img.data;
+
+    // Prepare PNG encoder
+    let file = File::create(filename)?;
+    let mut encoder = png::Encoder::new(file, width.into(), height.into());
+    encoder.set_color(png::ColorType::Rgb);
+    encoder.set_depth(png::BitDepth::Eight);
+    let mut writer = encoder.write_header()?;
+
+    // Convert X11 pixel data to RGB
+    // X11 ZPixmap data is typically in BGRA format (4 bytes per pixel)
+    let mut rgb_buf = Vec::with_capacity((width as usize) * (height as usize) * 3);
+    for chunk in data.chunks(4) {
+        if chunk.len() >= 3 {
+            let b = chunk[0];
+            let g = chunk[1];
+            let r = chunk[2];
+            // skip chunk[3] (alpha/padding)
+            rgb_buf.extend_from_slice(&[r, g, b]);
+        }
+    }
+
+    writer.write_image_data(&rgb_buf)?;
+    Ok(())
 }
 
 /// Setup process-level stealth features
