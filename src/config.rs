@@ -11,6 +11,10 @@ pub struct OverlayConfig {
     pub height: u16,
     /// ARGB color (e.g., 0x80FF0000 for 50% transparent red)
     pub color: u32,
+    /// Text color (RGB format, e.g., 0xFFFFFF for white)
+    pub text_color: u32,
+    /// Text outline/shadow color (RGB format, e.g., 0x000000 for black)
+    pub text_outline_color: u32,
 }
 
 impl Default for OverlayConfig {
@@ -20,7 +24,9 @@ impl Default for OverlayConfig {
             y: 100,
             width: 800,
             height: 600,
-            color: 0x80FF0000, // 50% alpha red
+            color: 0x80FF0000,            // 50% alpha red
+            text_color: 0xFFFFFF,         // white
+            text_outline_color: 0x000000, // black outline
         }
     }
 }
@@ -44,6 +50,16 @@ impl OverlayConfig {
 
     pub fn with_color(mut self, color: u32) -> Self {
         self.color = color;
+        self
+    }
+
+    pub fn with_text_color(mut self, color: u32) -> Self {
+        self.text_color = color;
+        self
+    }
+
+    pub fn with_text_outline_color(mut self, color: u32) -> Self {
+        self.text_outline_color = color;
         self
     }
 }

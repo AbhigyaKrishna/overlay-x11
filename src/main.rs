@@ -39,7 +39,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     let config = OverlayConfig::new()
         .with_position(100, 100)
         .with_size(overlay_width, overlay_height)
-        .with_color(0x801c1c1c); // 50% transparent gray
+        .with_color(0x80ffffff); // 50% transparent gray
 
     // Open a built-in X11 font (larger size)
     let font_id = conn.generate_id()?;

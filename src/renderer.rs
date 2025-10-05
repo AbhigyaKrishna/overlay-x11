@@ -55,25 +55,46 @@ impl Renderer {
         // Draw text if font is set and text is not empty
         if let Some(font) = self.font {
             if !self.text.is_empty() {
+                // Draw text with outline/shadow for better visibility on any background
+                let offsets = [(-1, -1), (1, -1), (-1, 1), (1, 1)]; // Outline positions
+
+                // First, draw the outline/shadow in all 4 directions
+                for (dx, dy) in &offsets {
+                    let gc_outline = conn.generate_id()?;
+                    conn.create_gc(
+                        gc_outline,
+                        window,
+                        &CreateGCAux::new()
+                            .foreground(self.config.text_outline_color)
+                            .font(font),
+                    )?;
+
+                    let mut y = 40;
+                    for line in self.text.lines() {
+                        if !line.is_empty() {
+                            conn.poly_text8(window, gc_outline, 20 + dx, y + dy, line.as_bytes())?;
+                        }
+                        y += 25;
+                    }
+                    conn.free_gc(gc_outline)?;
+                }
+
+                // Then draw the main text on top
                 let gc_text = conn.generate_id()?;
-                let white = 0xFFFFFFFFu32; // opaque white
-                let transparent = 0x00000000u32; // transparent background
                 conn.create_gc(
                     gc_text,
                     window,
                     &CreateGCAux::new()
-                        .foreground(white)
-                        .background(transparent)
+                        .foreground(self.config.text_color)
                         .font(font),
                 )?;
 
-                // Draw each line of text
                 let mut y = 40;
                 for line in self.text.lines() {
                     if !line.is_empty() {
-                        conn.image_text8(window, gc_text, 20, y, line.as_bytes())?;
+                        conn.poly_text8(window, gc_text, 20, y, line.as_bytes())?;
                     }
-                    y += 25; // Line spacing
+                    y += 25;
                 }
                 conn.free_gc(gc_text)?;
             }
