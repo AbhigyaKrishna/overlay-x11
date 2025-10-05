@@ -16,6 +16,8 @@ use renderer::Renderer;
 // X11 keysyms
 const XK_O: u32 = 0x006f; // 'O' key
 const XK_S: u32 = 0x0073; // 'S' key
+const XK_UP: u32 = 0xff52; // Up arrow
+const XK_DOWN: u32 = 0xff54; // Down arrow
 
 fn main() -> Result<(), Box<dyn Error>> {
     // Setup process stealth features only in release builds
@@ -69,13 +71,21 @@ fn main() -> Result<(), Box<dyn Error>> {
         font_ascent + font_descent
     );
 
-    // Initialize renderer with font, metrics, and text
+    // Initialize renderer with font, metrics, and multi-line text for scrolling demo
+    let initial_text = (1..=50)
+        .map(|i| {
+            format!(
+                "Line #{:03} - Screen: {}x{}, Overlay: {}x{}",
+                i, screen_width, screen_height, overlay_width, overlay_height
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+
     let mut renderer = Renderer::new(config.clone())
         .with_font(font_id, font_ascent, font_descent)
-        .with_text(format!(
-            "Screen: {}x{}\nOverlay: {}x{}",
-            screen_width, screen_height, overlay_width, overlay_height
-        ));
+        .with_text(initial_text)
+        .with_scroll_offset(0);
 
     // Find a 32-bit (ARGB) visual for transparency
     let visual_id = screen
@@ -141,9 +151,11 @@ fn main() -> Result<(), Box<dyn Error>> {
         &[], // empty region = fully click-through
     )?;
 
-    // Grab Ctrl+Alt+O on the root window
+    // Grab Ctrl+Alt+O/S for overlay toggle and screenshot
     let keycode_o = get_keycode(&conn, XK_O)?;
     let keycode_s = get_keycode(&conn, XK_S)?;
+    let keycode_up = get_keycode(&conn, XK_UP)?;
+    let keycode_down = get_keycode(&conn, XK_DOWN)?;
     let modifiers = ModMask::CONTROL | ModMask::M1; // M1 = Alt
 
     // Grab the key combinations globally
@@ -166,6 +178,36 @@ fn main() -> Result<(), Box<dyn Error>> {
         GrabMode::ASYNC,
     )?;
 
+    // Helper to grab/ungrab arrow keys
+    let grab_arrow_keys = |grab: bool| -> Result<(), Box<dyn Error>> {
+        if grab {
+            conn.grab_key(
+                false,
+                root,
+                ModMask::default(),
+                keycode_up,
+                GrabMode::ASYNC,
+                GrabMode::ASYNC,
+            )?;
+            conn.grab_key(
+                false,
+                root,
+                ModMask::default(),
+                keycode_down,
+                GrabMode::ASYNC,
+                GrabMode::ASYNC,
+            )?;
+        } else {
+            conn.ungrab_key(keycode_up, root, ModMask::default())?;
+            conn.ungrab_key(keycode_down, root, ModMask::default())?;
+        }
+        conn.flush()?;
+        Ok(())
+    };
+
+    // Initially grab arrow keys since overlay starts visible
+    grab_arrow_keys(true)?;
+
     // Initial state: visible
     let mut visible = true;
     conn.map_window(win)?;
@@ -181,16 +223,34 @@ fn main() -> Result<(), Box<dyn Error>> {
                 // Use renderer to draw the overlay
                 renderer.render(&conn, win)?;
             }
+            Some(Event::KeyPress(k)) if k.detail == keycode_up && visible => {
+                // Scroll up
+                renderer.scroll_up();
+                conn.clear_area(false, win, 0, 0, 0, 0)?;
+                conn.flush()?;
+                #[cfg(debug_assertions)]
+                println!("Debug: Scrolled up");
+            }
+            Some(Event::KeyPress(k)) if k.detail == keycode_down && visible => {
+                // Scroll down
+                renderer.scroll_down();
+                conn.clear_area(false, win, 0, 0, 0, 0)?;
+                conn.flush()?;
+                #[cfg(debug_assertions)]
+                println!("Debug: Scrolled down");
+            }
             Some(Event::KeyPress(k)) if k.detail == keycode_o => {
                 // Check if the modifiers match (Ctrl+Alt)
                 if k.state.contains(ModMask::CONTROL) && k.state.contains(ModMask::M1) {
                     // Toggle visibility
                     if visible {
                         conn.unmap_window(win)?;
+                        grab_arrow_keys(false)?; // Ungrab arrows when hidden
                         #[cfg(debug_assertions)]
                         println!("Debug: Overlay hidden");
                     } else {
                         conn.map_window(win)?;
+                        grab_arrow_keys(true)?; // Grab arrows when shown
                         #[cfg(debug_assertions)]
                         println!("Debug: Overlay shown");
                     }
@@ -228,13 +288,15 @@ fn main() -> Result<(), Box<dyn Error>> {
                                             #[cfg(debug_assertions)]
                                             println!("Debug: Gemini analysis received");
 
-                                            // Update renderer with new text
+                                            // Update renderer with new text (preserve scroll offset)
+                                            let current_offset = renderer.scroll_offset();
                                             renderer = Renderer::new(config.clone())
                                                 .with_font(font_id, font_ascent, font_descent)
                                                 .with_text(format!(
                                                     "Screenshot Analysis:\n\n{}",
                                                     analysis
-                                                ));
+                                                ))
+                                                .with_scroll_offset(current_offset);
 
                                             // Trigger redraw by sending expose event
                                             conn.clear_area(false, win, 0, 0, 0, 0)?;

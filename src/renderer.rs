@@ -11,6 +11,7 @@ pub struct Renderer {
     text: String,
     font_ascent: u16,
     font_descent: u16,
+    scroll_offset: i16,
 }
 
 impl Renderer {
@@ -21,6 +22,7 @@ impl Renderer {
             text: String::new(),
             font_ascent: 0,
             font_descent: 0,
+            scroll_offset: 0,
         }
     }
 
@@ -34,6 +36,27 @@ impl Renderer {
     pub fn with_text(mut self, text: String) -> Self {
         self.text = text;
         self
+    }
+
+    pub fn with_scroll_offset(mut self, offset: i16) -> Self {
+        self.scroll_offset = offset;
+        self
+    }
+
+    pub fn scroll_offset(&self) -> i16 {
+        self.scroll_offset
+    }
+
+    pub fn scroll_up(&mut self) {
+        let line_height = (self.font_ascent + self.font_descent + 4) as i16;
+        self.scroll_offset = (self.scroll_offset - line_height).max(0);
+    }
+
+    pub fn scroll_down(&mut self) {
+        let line_height = (self.font_ascent + self.font_descent + 4) as i16;
+        let line_count = self.text.lines().count() as i16;
+        let max_offset = (line_count * line_height) - self.config.height as i16;
+        self.scroll_offset = (self.scroll_offset + line_height).min(max_offset.max(0));
     }
 
     /// Render the overlay on the given window
@@ -63,6 +86,9 @@ impl Renderer {
             if !self.text.is_empty() {
                 let line_height = (self.font_ascent + self.font_descent) as i16 + 4; // padding
 
+                // Calculate initial y position with scroll offset
+                let base_y = self.font_ascent as i16 + 20 - self.scroll_offset;
+
                 // Draw outline/shadow in 4 directions
                 for &(dx, dy) in &[(-1, -1), (1, -1), (-1, 1), (1, 1)] {
                     let gc_outline = conn.generate_id()?;
@@ -75,9 +101,12 @@ impl Renderer {
                             .font(font),
                     )?;
 
-                    let mut y = self.font_ascent as i16 + 20;
+                    let mut y = base_y;
                     for line in self.text.lines() {
-                        conn.image_text8(window, gc_outline, 20 + dx, y + dy, line.as_bytes())?;
+                        // Only draw lines within visible bounds
+                        if y >= 0 && y < self.config.height as i16 {
+                            conn.image_text8(window, gc_outline, 20 + dx, y + dy, line.as_bytes())?;
+                        }
                         y += line_height;
                     }
                     conn.free_gc(gc_outline)?;
@@ -94,9 +123,12 @@ impl Renderer {
                         .font(font),
                 )?;
 
-                let mut y = self.font_ascent as i16 + 20;
+                let mut y = base_y;
                 for line in self.text.lines() {
-                    conn.image_text8(window, gc_text, 20, y, line.as_bytes())?;
+                    // Only draw lines within visible bounds
+                    if y >= 0 && y < self.config.height as i16 {
+                        conn.image_text8(window, gc_text, 20, y, line.as_bytes())?;
+                    }
                     y += line_height;
                 }
                 conn.free_gc(gc_text)?;
