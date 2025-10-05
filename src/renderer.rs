@@ -9,6 +9,8 @@ pub struct Renderer {
     config: OverlayConfig,
     font: Option<Font>,
     text: String,
+    font_ascent: u16,
+    font_descent: u16,
 }
 
 impl Renderer {
@@ -17,11 +19,15 @@ impl Renderer {
             config,
             font: None,
             text: String::new(),
+            font_ascent: 0,
+            font_descent: 0,
         }
     }
 
-    pub fn with_font(mut self, font: Font) -> Self {
+    pub fn with_font(mut self, font: Font, ascent: u16, descent: u16) -> Self {
         self.font = Some(font);
+        self.font_ascent = ascent;
+        self.font_descent = descent;
         self
     }
 
@@ -55,11 +61,10 @@ impl Renderer {
         // Draw text if font is set and text is not empty
         if let Some(font) = self.font {
             if !self.text.is_empty() {
-                // Draw text with outline/shadow for better visibility on any background
-                let offsets = [(-1, -1), (1, -1), (-1, 1), (1, 1)]; // Outline positions
+                let line_height = (self.font_ascent + self.font_descent) as i16 + 4; // padding
 
-                // First, draw the outline/shadow in all 4 directions
-                for (dx, dy) in &offsets {
+                // Draw outline/shadow in 4 directions
+                for &(dx, dy) in &[(-1, -1), (1, -1), (-1, 1), (1, 1)] {
                     let gc_outline = conn.generate_id()?;
                     conn.create_gc(
                         gc_outline,
@@ -69,17 +74,15 @@ impl Renderer {
                             .font(font),
                     )?;
 
-                    let mut y = 40;
+                    let mut y = self.font_ascent as i16 + 20;
                     for line in self.text.lines() {
-                        if !line.is_empty() {
-                            conn.poly_text8(window, gc_outline, 20 + dx, y + dy, line.as_bytes())?;
-                        }
-                        y += 25;
+                        conn.image_text8(window, gc_outline, 20 + dx, y + dy, line.as_bytes())?;
+                        y += line_height;
                     }
                     conn.free_gc(gc_outline)?;
                 }
 
-                // Then draw the main text on top
+                // Draw main text on top
                 let gc_text = conn.generate_id()?;
                 conn.create_gc(
                     gc_text,
@@ -89,12 +92,10 @@ impl Renderer {
                         .font(font),
                 )?;
 
-                let mut y = 40;
+                let mut y = self.font_ascent as i16 + 20;
                 for line in self.text.lines() {
-                    if !line.is_empty() {
-                        conn.poly_text8(window, gc_text, 20, y, line.as_bytes())?;
-                    }
-                    y += 25;
+                    conn.image_text8(window, gc_text, 20, y, line.as_bytes())?;
+                    y += line_height;
                 }
                 conn.free_gc(gc_text)?;
             }
@@ -103,7 +104,6 @@ impl Renderer {
         conn.flush()?;
         Ok(())
     }
-
     #[allow(dead_code)]
     pub fn config(&self) -> &OverlayConfig {
         &self.config

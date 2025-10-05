@@ -54,9 +54,22 @@ fn main() -> Result<(), Box<dyn Error>> {
         }
     }
 
-    // Initialize renderer with font and text
+    // Query font metrics for proper line spacing
+    let font_info = conn.query_font(font_id)?.reply()?;
+    let font_ascent = font_info.font_ascent as u16;
+    let font_descent = font_info.font_descent as u16;
+
+    #[cfg(debug_assertions)]
+    println!(
+        "Font metrics: ascent={}, descent={}, line_height={}",
+        font_ascent,
+        font_descent,
+        font_ascent + font_descent
+    );
+
+    // Initialize renderer with font, metrics, and text
     let renderer = Renderer::new(config.clone())
-        .with_font(font_id)
+        .with_font(font_id, font_ascent, font_descent)
         .with_text(format!(
             "Screen: {}x{}\nOverlay: {}x{}",
             screen_width, screen_height, overlay_width, overlay_height
