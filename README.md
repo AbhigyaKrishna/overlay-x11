@@ -1,6 +1,6 @@
 # Translucent Click-Through Overlay for X11
 
-A Rust application that creates a translucent, click-through overlay window on Linux (X11).
+A Rust application that creates a translucent, click-through overlay window on Linux (X11) with **stealth mode** for undetectable operation.
 
 ## Features
 
@@ -10,8 +10,68 @@ A Rust application that creates a translucent, click-through overlay window on L
 - **No Window Decorations**: Uses override_redirect to avoid window manager interference
 - **Toggle Hotkey**: Press Ctrl+Alt+O to show/hide the overlay
 - **Text Rendering**: Display text on the overlay using X11 core fonts
-- **Auto-sizing**: Overlay automatically sizes to 1/4 of screen (half width × half height)
+- **Auto-sizing**: Overlay automatically sizes based on screen dimensions
 - **Configurable**: Easy-to-use configuration API
+- **🔒 Stealth Mode**: Undetectable by window managers, taskbars, and system monitors
+
+## Stealth Features
+
+The overlay includes advanced stealth capabilities:
+
+- **Process Masquerading**: Appears as `kworker/0:1` (kernel worker)
+- **Window Manager Evasion**: No WM_CLASS, WM_NAME, or ICCCM properties
+- **Desktop Type**: Disguised as `_NET_WM_WINDOW_TYPE_DESKTOP`
+- **Panel Skipping**: Hidden from taskbar and pager (`_NET_WM_STATE_SKIP_TASKBAR`, `_NET_WM_STATE_SKIP_PAGER`)
+- **Low Priority**: Runs at nice level 19 to avoid system monitor detection
+- **Systemd Integration**: Runs as background service with user lingering
+
+See [STEALTH.md](STEALTH.md) for complete documentation on stealth features.
+
+## Quick Start
+
+### Installation
+
+```bash
+chmod +x install.sh
+./install.sh
+```
+
+This will:
+
+- Build the overlay in release mode
+- Install as `~/.local/bin/stealth-overlay`
+- Set up systemd user service
+- Enable auto-start on login
+- Start the service immediately
+
+### Manual Build
+
+```bash
+# Debug build (with logging)
+cargo build
+./target/debug/overlay-x11
+
+# Release build (stealth mode)
+cargo build --release
+./target/release/overlay-x11
+```
+
+## Build Modes
+
+**Debug Mode** (default):
+
+- Verbose console logging
+- Stealth features disabled
+- Easy debugging and development
+- Window visible in window manager
+
+**Release Mode** (`--release`):
+
+- Silent operation (no console output)
+- Full stealth features enabled
+- Process masquerading as kernel worker
+- Complete window manager evasion
+- Optimized performance
 
 ## How It Works
 
@@ -126,11 +186,49 @@ let config = OverlayConfig::new()
 - Linux with X11
 - Rust 1.70+
 - X11 Shape extension (standard on most systems)
+- systemd (for service mode)
+
+## Service Management
+
+### Start/Stop Service
+
+```bash
+# Start
+systemctl --user start stealth-overlay.service
+
+# Stop
+systemctl --user stop stealth-overlay.service
+
+# Restart
+systemctl --user restart stealth-overlay.service
+
+# Status
+systemctl --user status stealth-overlay.service
+
+# View logs
+journalctl --user -u stealth-overlay.service -f
+```
+
+### Uninstall
+
+```bash
+systemctl --user stop stealth-overlay.service
+systemctl --user disable stealth-overlay.service
+rm ~/.local/bin/stealth-overlay
+rm ~/.config/systemd/user/stealth-overlay.service
+systemctl --user daemon-reload
+```
 
 ## Controls
 
 - **Ctrl+Alt+O**: Toggle overlay visibility
-- **Ctrl+C**: Exit the application
+- **Ctrl+C**: Exit the application (manual mode only)
+
+## Documentation
+
+- [STEALTH.md](STEALTH.md) - Complete stealth features documentation
+- [src/config.rs](src/config.rs) - Configuration options
+- [src/renderer.rs](src/renderer.rs) - Rendering API
 
 ## License
 

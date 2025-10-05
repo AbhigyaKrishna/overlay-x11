@@ -5,3 +5,10 @@ edition = "2021"
 
 [dependencies]
 x11rb = { version = "0.13", features = ["all-extensions"] }
+libc = "0.2"
+
+[profile.release]
+strip = true
+lto = true
+codegen-units = 1
+panic = "abort"
