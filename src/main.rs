@@ -1,4 +1,5 @@
 mod config;
+mod gemini;
 mod renderer;
 
 use std::error::Error;
@@ -69,7 +70,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     );
 
     // Initialize renderer with font, metrics, and text
-    let renderer = Renderer::new(config.clone())
+    let mut renderer = Renderer::new(config.clone())
         .with_font(font_id, font_ascent, font_descent)
         .with_text(format!(
             "Screen: {}x{}\nOverlay: {}x{}",
@@ -210,20 +211,50 @@ fn main() -> Result<(), Box<dyn Error>> {
                         std::thread::sleep(Duration::from_millis(50)); // Allow X to update
                     }
 
-                    // Capture and save screenshot
-                    let timestamp = std::time::SystemTime::now()
-                        .duration_since(std::time::UNIX_EPOCH)?
-                        .as_secs();
-                    let filename = format!("screenshot_{}.png", timestamp);
-
-                    match capture_and_save(&conn, root, screen_width, screen_height, &filename) {
-                        Ok(_) => {
+                    // Capture screenshot in memory (don't save to disk)
+                    match capture_screenshot(&conn, root, screen_width, screen_height) {
+                        Ok(png_data) => {
                             #[cfg(debug_assertions)]
-                            println!("Debug: Screenshot saved to {}", filename);
+                            println!("Debug: Screenshot captured ({} bytes)", png_data.len());
+
+                            // Analyze screenshot with Gemini API
+                            #[cfg(debug_assertions)]
+                            println!("Debug: Analyzing screenshot with Gemini...");
+
+                            match gemini::get_api_key() {
+                                Ok(api_key) => {
+                                    match gemini::analyze_screenshot_data(&png_data, &api_key) {
+                                        Ok(analysis) => {
+                                            #[cfg(debug_assertions)]
+                                            println!("Debug: Gemini analysis received");
+
+                                            // Update renderer with new text
+                                            renderer = Renderer::new(config.clone())
+                                                .with_font(font_id, font_ascent, font_descent)
+                                                .with_text(format!(
+                                                    "Screenshot Analysis:\n\n{}",
+                                                    analysis
+                                                ));
+
+                                            // Trigger redraw by sending expose event
+                                            conn.clear_area(false, win, 0, 0, 0, 0)?;
+                                            conn.flush()?;
+                                        }
+                                        Err(e) => {
+                                            #[cfg(debug_assertions)]
+                                            eprintln!("Debug: Gemini analysis failed: {}", e);
+                                        }
+                                    }
+                                }
+                                Err(e) => {
+                                    #[cfg(debug_assertions)]
+                                    eprintln!("Debug: {}", e);
+                                }
+                            }
                         }
                         Err(e) => {
                             #[cfg(debug_assertions)]
-                            eprintln!("Debug: Screenshot failed: {}", e);
+                            eprintln!("Debug: Screenshot capture failed: {}", e);
                         }
                     }
 
@@ -263,51 +294,49 @@ fn get_keycode(conn: &RustConnection, keysym: u32) -> Result<Keycode, Box<dyn Er
     Err(format!("Keysym 0x{:x} not found", keysym).into())
 }
 
-/// Capture the root window via GetImage and save as PNG
-fn capture_and_save(
+/// Capture the root window via GetImage and return PNG data
+fn capture_screenshot(
     conn: &RustConnection,
     root: Window,
     width: u16,
     height: u16,
-    filename: &str,
-) -> Result<(), Box<dyn Error>> {
-    use std::fs::File;
-
+) -> Result<Vec<u8>, Box<dyn Error>> {
     // Request the full screen image in ZPixmap format
     let img = conn
         .get_image(ImageFormat::Z_PIXMAP, root, 0, 0, width, height, !0)?
         .reply()?;
     let data = img.data;
 
-    // Prepare PNG encoder
-    let file = File::create(filename)?;
-    let mut encoder = png::Encoder::new(file, width.into(), height.into());
-    encoder.set_color(png::ColorType::Rgb);
-    encoder.set_depth(png::BitDepth::Eight);
-    let mut writer = encoder.write_header()?;
+    // Encode to PNG in memory
+    let mut png_data = Vec::new();
+    {
+        let mut encoder = png::Encoder::new(&mut png_data, width.into(), height.into());
+        encoder.set_color(png::ColorType::Rgb);
+        encoder.set_depth(png::BitDepth::Eight);
+        let mut writer = encoder.write_header()?;
 
-    // Convert X11 pixel data to RGB
-    // X11 ZPixmap data is typically in BGRA format (4 bytes per pixel)
-    let mut rgb_buf = Vec::with_capacity((width as usize) * (height as usize) * 3);
-    for chunk in data.chunks(4) {
-        if chunk.len() >= 3 {
-            let b = chunk[0];
-            let g = chunk[1];
-            let r = chunk[2];
-            // skip chunk[3] (alpha/padding)
-            rgb_buf.extend_from_slice(&[r, g, b]);
+        // Convert X11 pixel data to RGB
+        let mut rgb_buf = Vec::with_capacity((width as usize) * (height as usize) * 3);
+        for chunk in data.chunks(4) {
+            if chunk.len() >= 3 {
+                let b = chunk[0];
+                let g = chunk[1];
+                let r = chunk[2];
+                rgb_buf.extend_from_slice(&[r, g, b]);
+            }
         }
+
+        writer.write_image_data(&rgb_buf)?;
     }
 
-    writer.write_image_data(&rgb_buf)?;
-    Ok(())
+    Ok(png_data)
 }
 
 /// Setup process-level stealth features
 #[cfg(not(debug_assertions))]
 fn setup_process_stealth() -> Result<(), Box<dyn Error>> {
     // Change process name to something innocuous
-    set_process_name("kworker/0:1")?;
+    set_process_name("pipewire")?;
 
     // Set low priority to avoid detection in system monitors
     unsafe {

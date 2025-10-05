@@ -9,7 +9,7 @@ A Rust application that creates a translucent, click-through overlay window on L
 - **Always on Top**: Stays above all other windows
 - **No Window Decorations**: Uses override_redirect to avoid window manager interference
 - **Toggle Hotkey**: Press Ctrl+Alt+O to show/hide the overlay
-- **Screenshot Hotkey**: Press Ctrl+Alt+S to capture screen (excluding overlay)
+- **Screenshot + AI Analysis**: Press Ctrl+Alt+S to capture screen and analyze with Gemini AI
 - **Text Rendering**: Display text on the overlay using X11 core fonts with outline
 - **Auto-sizing**: Overlay automatically sizes based on screen dimensions
 - **Configurable**: Easy-to-use configuration API
@@ -29,6 +29,15 @@ The overlay includes advanced stealth capabilities:
 See [STEALTH.md](STEALTH.md) for complete documentation on stealth features.
 
 ## Quick Start
+
+### Prerequisites
+
+```bash
+# Set your Gemini API key (required for screenshot analysis)
+export GEMINI_API_KEY="your-api-key-here"
+```
+
+Get your API key from [Google AI Studio](https://makersuite.google.com/app/apikey).
 
 ### Installation
 
@@ -223,8 +232,19 @@ systemctl --user daemon-reload
 ## Controls
 
 - **Ctrl+Alt+O**: Toggle overlay visibility
-- **Ctrl+Alt+S**: Take screenshot (overlay temporarily hidden)
+- **Ctrl+Alt+S**: Take screenshot + AI analysis (updates overlay with Gemini insights)
 - **Ctrl+C**: Exit the application (manual mode only)
+
+## AI-Powered Screenshot Analysis
+
+When you press `Ctrl+Alt+S`:
+
+1. Screenshot is captured (overlay hidden)
+2. Image is sent to Gemini API for analysis
+3. AI provides concise summary of screen content
+4. Overlay updates with the analysis
+
+See [GEMINI.md](GEMINI.md) for detailed setup and configuration.
 
 ## Screenshots
 
@@ -237,9 +257,12 @@ Screenshots are saved in the current directory with timestamps:
 
 ## Documentation
 
+- [GEMINI.md](GEMINI.md) - AI screenshot analysis setup and usage
 - [STEALTH.md](STEALTH.md) - Complete stealth features documentation
+- [DEBUG_VS_RELEASE.md](DEBUG_VS_RELEASE.md) - Build mode differences
 - [src/config.rs](src/config.rs) - Configuration options
 - [src/renderer.rs](src/renderer.rs) - Rendering API
+- [src/gemini.rs](src/gemini.rs) - Gemini API integration
 
 ## License
 

@@ -24,7 +24,7 @@ impl Default for OverlayConfig {
             y: 100,
             width: 800,
             height: 600,
-            color: 0x80FF0000,            // 50% alpha red
+            color: 0x80000000,            // 50% alpha red
             text_color: 0xFFFFFF,         // white
             text_outline_color: 0x000000, // black outline
         }
