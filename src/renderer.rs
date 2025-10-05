@@ -71,6 +71,7 @@ impl Renderer {
                         window,
                         &CreateGCAux::new()
                             .foreground(self.config.text_outline_color)
+                            .background(self.config.color)
                             .font(font),
                     )?;
 
@@ -89,6 +90,7 @@ impl Renderer {
                     window,
                     &CreateGCAux::new()
                         .foreground(self.config.text_color)
+                        .background(self.config.color)
                         .font(font),
                 )?;
 
