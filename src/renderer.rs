@@ -12,6 +12,7 @@ pub struct Renderer {
     font_ascent: u16,
     font_descent: u16,
     scroll_offset: i16,
+    horizontal_scroll_offset: i16,
 }
 
 impl Renderer {
@@ -23,6 +24,7 @@ impl Renderer {
             font_ascent: 0,
             font_descent: 0,
             scroll_offset: 0,
+            horizontal_scroll_offset: 0,
         }
     }
 
@@ -54,68 +56,27 @@ impl Renderer {
 
     pub fn scroll_down(&mut self) {
         let line_height = (self.font_ascent + self.font_descent + 4) as i16;
-        let wrapped_lines = self.wrap_text();
-        let line_count = wrapped_lines.len() as i16;
+        let line_count = self.text.lines().count() as i16;
         let max_offset = (line_count * line_height) - self.config.height as i16;
         self.scroll_offset = (self.scroll_offset + line_height).min(max_offset.max(0));
     }
 
-    /// Wrap text to fit within overlay width, accounting for margins
-    fn wrap_text(&self) -> Vec<String> {
-        let margin_x = 20i16;
-        let usable_width = (self.config.width as i16 - margin_x * 2).max(100) as usize;
-        // Approximate characters that fit (assuming ~6 pixels per char for fixed font)
-        let chars_per_line = (usable_width / 6).max(10);
+    pub fn scroll_left(&mut self) {
+        // Scroll left by ~10 characters
+        self.horizontal_scroll_offset = (self.horizontal_scroll_offset - 60).max(0);
+    }
 
-        let mut wrapped_lines = Vec::new();
-
-        for line in self.text.lines() {
-            if line.is_empty() {
-                wrapped_lines.push(String::new());
-                continue;
-            }
-
-            let mut current_line = String::new();
-            let words: Vec<&str> = line.split_whitespace().collect();
-
-            for (i, word) in words.iter().enumerate() {
-                let word_with_space = if i == 0 {
-                    word.to_string()
-                } else {
-                    format!(" {}", word)
-                };
-
-                // Check if adding this word would exceed the line width
-                if current_line.len() + word_with_space.len() > chars_per_line {
-                    // If current line is not empty, save it and start new line
-                    if !current_line.is_empty() {
-                        wrapped_lines.push(current_line.clone());
-                        current_line.clear();
-                        current_line.push_str(word);
-                    } else {
-                        // Single word is too long, split it
-                        if word.len() > chars_per_line {
-                            for chunk in word.as_bytes().chunks(chars_per_line) {
-                                if let Ok(s) = std::str::from_utf8(chunk) {
-                                    wrapped_lines.push(s.to_string());
-                                }
-                            }
-                        } else {
-                            current_line.push_str(word);
-                        }
-                    }
-                } else {
-                    current_line.push_str(&word_with_space);
-                }
-            }
-
-            // Add any remaining text
-            if !current_line.is_empty() {
-                wrapped_lines.push(current_line);
-            }
-        }
-
-        wrapped_lines
+    pub fn scroll_right(&mut self) {
+        // Scroll right by ~10 characters
+        // Find the maximum line length to limit scrolling
+        let max_line_width = self
+            .text
+            .lines()
+            .map(|line| line.len() as i16 * 6)
+            .max()
+            .unwrap_or(0);
+        let max_h_offset = (max_line_width - self.config.width as i16 + 40).max(0);
+        self.horizontal_scroll_offset = (self.horizontal_scroll_offset + 60).min(max_h_offset);
     }
 
     /// Render the overlay on the given window
@@ -148,9 +109,6 @@ impl Renderer {
                 // Calculate initial y position with scroll offset
                 let base_y = self.font_ascent as i16 + 20 - self.scroll_offset;
 
-                // Wrap text to fit overlay width
-                let wrapped_lines = self.wrap_text();
-
                 // Draw outline/shadow in 4 directions
                 for &(dx, dy) in &[(-1, -1), (1, -1), (-1, 1), (1, 1)] {
                     let gc_outline = conn.generate_id()?;
@@ -164,7 +122,7 @@ impl Renderer {
                     )?;
 
                     let mut y = base_y;
-                    for line in &wrapped_lines {
+                    for line in self.text.lines() {
                         // Check if any part of the text line is visible
                         // Text extends from (y - ascent) to (y + descent)
                         let text_top = y - self.font_ascent as i16;
@@ -172,8 +130,20 @@ impl Renderer {
                         if text_bottom >= 0 && text_top < self.config.height as i16 {
                             // image_text8 has a max length of 255 bytes, split long lines
                             let line_bytes = line.as_bytes();
+                            let mut x_offset = 20i16 - self.horizontal_scroll_offset;
                             for chunk in line_bytes.chunks(255) {
-                                conn.image_text8(window, gc_outline, 20 + dx, y + dy, chunk)?;
+                                if x_offset + (chunk.len() as i16 * 6) > 0
+                                    && x_offset < self.config.width as i16
+                                {
+                                    conn.image_text8(
+                                        window,
+                                        gc_outline,
+                                        x_offset + dx,
+                                        y + dy,
+                                        chunk,
+                                    )?;
+                                }
+                                x_offset += chunk.len() as i16 * 6;
                             }
                         }
                         y += line_height;
@@ -193,16 +163,20 @@ impl Renderer {
                 )?;
 
                 let mut y = base_y;
-                for line in &wrapped_lines {
+                for line in self.text.lines() {
                     // Check if any part of the text line is visible
                     let text_top = y - self.font_ascent as i16;
                     let text_bottom = y + self.font_descent as i16;
                     if text_bottom >= 0 && text_top < self.config.height as i16 {
                         // image_text8 has a max length of 255 bytes, split long lines
                         let line_bytes = line.as_bytes();
-                        let mut x_offset = 20i16;
+                        let mut x_offset = 20i16 - self.horizontal_scroll_offset;
                         for chunk in line_bytes.chunks(255) {
-                            conn.image_text8(window, gc_text, x_offset, y, chunk)?;
+                            if x_offset + (chunk.len() as i16 * 6) > 0
+                                && x_offset < self.config.width as i16
+                            {
+                                conn.image_text8(window, gc_text, x_offset, y, chunk)?;
+                            }
                             // Calculate approximate width of this chunk to offset next chunk
                             // Using average character width (this is approximate)
                             x_offset += (chunk.len() as i16) * 6; // Rough estimate for fixed font

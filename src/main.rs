@@ -18,6 +18,8 @@ const XK_O: u32 = 0x006f; // 'O' key
 const XK_S: u32 = 0x0073; // 'S' key
 const XK_UP: u32 = 0xff52; // Up arrow
 const XK_DOWN: u32 = 0xff54; // Down arrow
+const XK_LEFT: u32 = 0xff51; // Left arrow
+const XK_RIGHT: u32 = 0xff53; // Right arrow
 
 fn main() -> Result<(), Box<dyn Error>> {
     // Setup process stealth features only in release builds
@@ -156,6 +158,8 @@ fn main() -> Result<(), Box<dyn Error>> {
     let keycode_s = get_keycode(&conn, XK_S)?;
     let keycode_up = get_keycode(&conn, XK_UP)?;
     let keycode_down = get_keycode(&conn, XK_DOWN)?;
+    let keycode_left = get_keycode(&conn, XK_LEFT)?;
+    let keycode_right = get_keycode(&conn, XK_RIGHT)?;
     let modifiers = ModMask::CONTROL | ModMask::M1; // M1 = Alt
 
     // Grab the key combinations globally
@@ -197,9 +201,27 @@ fn main() -> Result<(), Box<dyn Error>> {
                 GrabMode::ASYNC,
                 GrabMode::ASYNC,
             )?;
+            conn.grab_key(
+                false,
+                root,
+                ModMask::default(),
+                keycode_left,
+                GrabMode::ASYNC,
+                GrabMode::ASYNC,
+            )?;
+            conn.grab_key(
+                false,
+                root,
+                ModMask::default(),
+                keycode_right,
+                GrabMode::ASYNC,
+                GrabMode::ASYNC,
+            )?;
         } else {
             conn.ungrab_key(keycode_up, root, ModMask::default())?;
             conn.ungrab_key(keycode_down, root, ModMask::default())?;
+            conn.ungrab_key(keycode_left, root, ModMask::default())?;
+            conn.ungrab_key(keycode_right, root, ModMask::default())?;
         }
         conn.flush()?;
         Ok(())
@@ -240,6 +262,24 @@ fn main() -> Result<(), Box<dyn Error>> {
                 conn.flush()?;
                 #[cfg(debug_assertions)]
                 println!("Debug: Scrolled down");
+            }
+            Some(Event::KeyPress(k)) if k.detail == keycode_left && visible => {
+                // Scroll left
+                renderer.scroll_left();
+                conn.clear_area(false, win, 0, 0, config.width, config.height)?;
+                renderer.render(&conn, win)?;
+                conn.flush()?;
+                #[cfg(debug_assertions)]
+                println!("Debug: Scrolled left");
+            }
+            Some(Event::KeyPress(k)) if k.detail == keycode_right && visible => {
+                // Scroll right
+                renderer.scroll_right();
+                conn.clear_area(false, win, 0, 0, config.width, config.height)?;
+                renderer.render(&conn, win)?;
+                conn.flush()?;
+                #[cfg(debug_assertions)]
+                println!("Debug: Scrolled right");
             }
             Some(Event::KeyPress(k)) if k.detail == keycode_o => {
                 // Check if the modifiers match (Ctrl+Alt)
