@@ -103,8 +103,11 @@ impl Renderer {
 
                     let mut y = base_y;
                     for line in self.text.lines() {
-                        // Only draw lines within visible bounds
-                        if y >= 0 && y < self.config.height as i16 {
+                        // Check if any part of the text line is visible
+                        // Text extends from (y - ascent) to (y + descent)
+                        let text_top = y - self.font_ascent as i16;
+                        let text_bottom = y + self.font_descent as i16;
+                        if text_bottom >= 0 && text_top < self.config.height as i16 {
                             conn.image_text8(window, gc_outline, 20 + dx, y + dy, line.as_bytes())?;
                         }
                         y += line_height;
@@ -125,8 +128,10 @@ impl Renderer {
 
                 let mut y = base_y;
                 for line in self.text.lines() {
-                    // Only draw lines within visible bounds
-                    if y >= 0 && y < self.config.height as i16 {
+                    // Check if any part of the text line is visible
+                    let text_top = y - self.font_ascent as i16;
+                    let text_bottom = y + self.font_descent as i16;
+                    if text_bottom >= 0 && text_top < self.config.height as i16 {
                         conn.image_text8(window, gc_text, 20, y, line.as_bytes())?;
                     }
                     y += line_height;
