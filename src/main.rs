@@ -16,19 +16,31 @@ use renderer::Renderer;
 const XK_O: u32 = 0x006f;
 
 fn main() -> Result<(), Box<dyn Error>> {
-    // Create configuration
-    let config = OverlayConfig::new()
-        .with_position(100, 100)
-        .with_size(800, 600)
-        .with_color(0x801c1c1c); // 50% transparent gray
-
-    // Initialize renderer
-    let renderer = Renderer::new(config.clone());
-
     // Connect to the X server
     let (conn, screen_num) = RustConnection::connect(None)?;
     let screen = &conn.setup().roots[screen_num];
     let root = screen.root;
+
+    // Get screen dimensions
+    let screen_width = screen.width_in_pixels;
+    let screen_height = screen.height_in_pixels;
+
+    // Calculate overlay size as 1/4 of screen (half width, half height)
+    let overlay_width = screen_width / 2;
+    let overlay_height = screen_height / 2;
+
+    // Center the overlay on the screen
+    let overlay_x = (screen_width - overlay_width) / 2;
+    let overlay_y = (screen_height - overlay_height) / 2;
+
+    // Create configuration with calculated dimensions
+    let config = OverlayConfig::new()
+        .with_position(overlay_x as i16, overlay_y as i16)
+        .with_size(overlay_width, overlay_height)
+        .with_color(0x801c1c1c); // 50% transparent gray
+
+    // Initialize renderer
+    let renderer = Renderer::new(config.clone());
 
     // Find a 32-bit (ARGB) visual for transparency
     let visual_id = screen
