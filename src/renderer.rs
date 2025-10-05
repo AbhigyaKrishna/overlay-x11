@@ -63,8 +63,15 @@ impl Renderer {
                     &CreateGCAux::new().foreground(white).font(font),
                 )?;
 
-                // Position text at (20, 40)
-                conn.image_text8(window, gc_text, 20, 40, self.text.as_bytes())?;
+                // Use poly_text8 for transparent background (instead of image_text8)
+                // Split text by newlines and render each line
+                let mut y = 40;
+                for line in self.text.lines() {
+                    if !line.is_empty() {
+                        conn.poly_text8(window, gc_text, 20, y, line.as_bytes())?;
+                    }
+                    y += 20; // Line spacing
+                }
                 conn.free_gc(gc_text)?;
             }
         }
