@@ -35,13 +35,17 @@ fn main() -> Result<(), Box<dyn Error>> {
         .with_size(overlay_width, overlay_height)
         .with_color(0x801c1c1c); // 50% transparent gray
 
-    // Open a built-in X11 font
+    // Open a built-in X11 font (larger size)
     let font_id = conn.generate_id()?;
-    // Try to open a common fixed-width font, fallback to "fixed" if not available
-    let font_name = b"-misc-fixed-medium-r-normal--13-120-75-75-C-70-iso8859-1";
+    // Try to open a larger fixed-width font (20 pixels), fallback to smaller if not available
+    let font_name = b"-misc-fixed-medium-r-normal--20-200-75-75-C-100-iso8859-1";
     if conn.open_font(font_id, font_name).is_err() {
-        // Fallback to the simple "fixed" font
-        conn.open_font(font_id, b"fixed")?;
+        // Fallback to a medium size
+        let fallback = b"-misc-fixed-medium-r-normal--15-140-75-75-C-90-iso8859-1";
+        if conn.open_font(font_id, fallback).is_err() {
+            // Last resort: simple "fixed" font
+            conn.open_font(font_id, b"fixed")?;
+        }
     }
 
     // Initialize renderer with font and text
