@@ -4,7 +4,7 @@ After=graphical-session.target
 
 [Service]
 Type=simple
-ExecStart=%h/.local/bin/stealth-overlay
+ExecStart=%h/.local/bin/stealth-overlay %h/.config/stealth-overlay/overlay.yml
 Restart=always
 RestartSec=5
 Environment=DISPLAY=:0

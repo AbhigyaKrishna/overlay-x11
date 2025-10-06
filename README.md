@@ -12,47 +12,105 @@ A Rust application that creates a translucent, click-through overlay window on L
 - **YAML Configuration**: Customizable colors, fonts, position, and size
 - **Stealth Mode**: Undetectable by window managers and system monitors
 
-## Quick Start
+## Installation
 
-### Installation
+### Automated Installation (Recommended)
 
-```bash
-chmod +x install.sh
-./install.sh
-```
-
-This will build, install, and set up the overlay as a systemd service with auto-start on login.
-
-### Configuration
-
-Create a `overlay.yml` file:
+Download and run the installation script:
 
 ```bash
-cp overlay.yml.example overlay.yml
+curl -fsSL https://raw.githubusercontent.com/AbhigyaKrishna/overlay-x11/main/install.sh | sh
 ```
 
-Edit the file to customize colors, position, size, font, and API key. See [CONFIG.md](CONFIG.md) for full documentation.
+This will:
+
+- Download the latest release binary from GitHub
+- Install to `~/.local/bin/stealth-overlay`
+- Download default configuration to `~/.config/stealth-overlay/overlay.yml`
+- Install and enable systemd service with auto-start on login
+- Configure user lingering for persistent service
+
+### Manual Installation
+
+1. Download the latest release binary:
+
+   ```bash
+   # Get latest version
+   curl -s https://api.github.com/repos/AbhigyaKrishna/overlay-x11/releases/latest \
+     | grep browser_download_url | cut -d '"' -f 4 | xargs curl -L -o overlay-x11
+
+   # Install
+   mkdir -p ~/.local/bin
+   mv overlay-x11 ~/.local/bin/stealth-overlay
+   chmod +x ~/.local/bin/stealth-overlay
+   ```
+
+2. Download configuration:
+
+   ```bash
+   mkdir -p ~/.config/stealth-overlay
+   curl -L -o ~/.config/stealth-overlay/overlay.yml \
+     https://raw.githubusercontent.com/AbhigyaKrishna/overlay-x11/main/overlay.yml.example
+   ```
+
+3. (Optional) Install systemd service:
+   ```bash
+   mkdir -p ~/.config/systemd/user
+   curl -L -o ~/.config/systemd/user/stealth-overlay.service \
+     https://raw.githubusercontent.com/AbhigyaKrishna/overlay-x11/main/stealth-overlay.service
+   systemctl --user daemon-reload
+   systemctl --user enable --now stealth-overlay.service
+   ```
+
+### Build from Source
+
+```bash
+git clone https://github.com/AbhigyaKrishna/overlay-x11.git
+cd overlay-x11
+cargo build --release
+cp target/release/overlay-x11 ~/.local/bin/stealth-overlay
+```
+
+## Configuration
+
+The configuration file is located at `~/.config/stealth-overlay/overlay.yml`.
+
+Edit this file to customize colors, position, size, font, and API key. See [CONFIG.md](CONFIG.md) for full documentation.
 
 ### Set Up Gemini API (Optional)
 
-For AI screenshot analysis:
+For AI screenshot analysis, add your API key to the configuration file:
+
+```bash
+# Edit config
+nano ~/.config/stealth-overlay/overlay.yml
+
+# Add or uncomment:
+# gemini_api_key: "your-api-key-here"
+```
+
+Alternatively, set as an environment variable:
 
 ```bash
 export GEMINI_API_KEY="your-api-key-here"
 ```
 
-Or add `gemini_api_key` to your `overlay.yml`. Get your key from [Google AI Studio](https://makersuite.google.com/app/apikey).
+Get your API key from [Google AI Studio](https://makersuite.google.com/app/apikey).
 
 ## Usage
 
 ### Running
 
+If using the systemd service (recommended), the overlay starts automatically on login.
+
+To run manually:
+
 ```bash
-# Use default config (overlay.yml)
-./overlay-x11
+# Run with default config (~/.config/stealth-overlay/overlay.yml)
+stealth-overlay
 
 # Use custom config file
-./overlay-x11 /path/to/config.yml
+stealth-overlay /path/to/config.yml
 ```
 
 ### Controls
@@ -129,10 +187,16 @@ cargo build --release
 ## Uninstall
 
 ```bash
+# Stop and disable service
 systemctl --user stop stealth-overlay.service
 systemctl --user disable stealth-overlay.service
+
+# Remove files
 rm ~/.local/bin/stealth-overlay
+rm -rf ~/.config/stealth-overlay
 rm ~/.config/systemd/user/stealth-overlay.service
+
+# Reload systemd
 systemctl --user daemon-reload
 ```
 
