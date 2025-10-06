@@ -1,43 +1,18 @@
 # Translucent Click-Through Overlay for X11
 
-A Rust application that creates a translucent, click-through overlay window on Linux (X11) with **stealth mode** for undetectable operation.
+A Rust application that creates a translucent, click-through overlay window on Linux (X11) with **stealth mode** for undetectable operation and **AI-powered screenshot analysis**.
 
 ## Features
 
-- **True Transparency**: Uses ARGB32 visual for per-pixel alpha
-- **Click-Through**: All mouse and keyboard events pass through to windows below using X11 Shape extension with empty input region
+- **True Transparency**: ARGB32 visual for per-pixel alpha
+- **Click-Through**: All events pass through to windows below
 - **Always on Top**: Stays above all other windows
-- **No Window Decorations**: Uses override_redirect to avoid window manager interference
-- **Toggle Hotkey**: Press Ctrl+Alt+O to show/hide the overlay
-- **Screenshot + AI Analysis**: Press Ctrl+Alt+S to capture screen and analyze with Gemini AI
-- **Text Rendering**: Display text on the overlay using X11 core fonts with outline
-- **Auto-sizing**: Overlay automatically sizes based on screen dimensions
-- **Configurable**: Easy-to-use configuration API
-- **🔒 Stealth Mode**: Undetectable by window managers, taskbars, and system monitors
-
-## Stealth Features
-
-The overlay includes advanced stealth capabilities:
-
-- **Process Masquerading**: Appears as `kworker/0:1` (kernel worker)
-- **Window Manager Evasion**: No WM_CLASS, WM_NAME, or ICCCM properties
-- **Desktop Type**: Disguised as `_NET_WM_WINDOW_TYPE_DESKTOP`
-- **Panel Skipping**: Hidden from taskbar and pager (`_NET_WM_STATE_SKIP_TASKBAR`, `_NET_WM_STATE_SKIP_PAGER`)
-- **Low Priority**: Runs at nice level 19 to avoid system monitor detection
-- **Systemd Integration**: Runs as background service with user lingering
-
-See [STEALTH.md](STEALTH.md) for complete documentation on stealth features.
+- **Scrollable Content**: Navigate long text with arrow keys (Up/Down/Left/Right)
+- **AI Screenshot Analysis**: Gemini-powered screen analysis
+- **YAML Configuration**: Customizable colors, fonts, position, and size
+- **Stealth Mode**: Undetectable by window managers and system monitors
 
 ## Quick Start
-
-### Prerequisites
-
-```bash
-# Set your Gemini API key (required for screenshot analysis)
-export GEMINI_API_KEY="your-api-key-here"
-```
-
-Get your API key from [Google AI Studio](https://makersuite.google.com/app/apikey).
 
 ### Installation
 
@@ -46,171 +21,54 @@ chmod +x install.sh
 ./install.sh
 ```
 
-This will:
+This will build, install, and set up the overlay as a systemd service with auto-start on login.
 
-- Build the overlay in release mode
-- Install as `~/.local/bin/stealth-overlay`
-- Set up systemd user service
-- Enable auto-start on login
-- Start the service immediately
+### Configuration
 
-### Manual Build
+Create a `overlay.yml` file:
 
 ```bash
-# Debug build (with logging)
-cargo build
-./target/debug/overlay-x11
-
-# Release build (stealth mode)
-cargo build --release
-./target/release/overlay-x11
+cp overlay.yml.example overlay.yml
 ```
 
-## Build Modes
+Edit the file to customize colors, position, size, font, and API key. See [CONFIG.md](CONFIG.md) for full documentation.
 
-**Debug Mode** (default):
+### Set Up Gemini API (Optional)
 
-- Verbose console logging
-- Stealth features disabled
-- Easy debugging and development
-- Window visible in window manager
+For AI screenshot analysis:
 
-**Release Mode** (`--release`):
-
-- Silent operation (no console output)
-- Full stealth features enabled
-- Process masquerading as kernel worker
-- Complete window manager evasion
-- Optimized performance
-
-## How It Works
-
-The click-through functionality is achieved by using the X11 Shape extension with an **empty input region**:
-
-```rust
-conn.shape_rectangles(
-    SO::SET,
-    SK::INPUT,
-    ClipOrdering::UNSORTED,
-    win,
-    0,
-    0,
-    &[], // empty region = fully click-through
-)?;
+```bash
+export GEMINI_API_KEY="your-api-key-here"
 ```
 
-This tells X11 that the window has no input shape, making all pointer and keyboard events pass through to windows below.
-
-## Project Structure
-
-```
-src/
-├── main.rs      - Application entry point and window management
-├── config.rs    - Configuration structure and builder
-└── renderer.rs  - Rendering logic
-```
-
-## Configuration
-
-The overlay can be configured using the `OverlayConfig` builder:
-
-```rust
-let config = OverlayConfig::new()
-    .with_position(100, 100)    // X, Y position
-    .with_size(800, 600)        // Width, Height
-    .with_color(0x80FF0000);    // ARGB color
-
-// Initialize renderer with optional font and text
-let renderer = Renderer::new(config)
-    .with_font(font_id)
-    .with_text("Hello, Overlay!".to_string());
-```
-
-### Text Rendering
-
-To render text on the overlay:
-
-1. Open an X11 font:
-
-```rust
-let font_id = conn.generate_id()?;
-conn.open_font(font_id, b"fixed")?;
-```
-
-2. Configure the renderer with font and text:
-
-```rust
-let renderer = Renderer::new(config)
-    .with_font(font_id)
-    .with_text("Your text here".to_string());
-```
-
-The text will be rendered in white at position (20, 40) on the overlay.
-
-### Color Format
-
-Colors are specified in ARGB format (32-bit hex):
-
-- `0xAARRGGBB`
-  - `AA` = Alpha (transparency): `00` = fully transparent, `FF` = fully opaque
-  - `RR` = Red component
-  - `GG` = Green component
-  - `BB` = Blue component
-
-**Examples:**
-
-- `0x80FF0000` - 50% transparent red
-- `0x4000FF00` - 25% transparent green
-- `0xCC0000FF` - 80% transparent blue
-- `0x60FFFF00` - 38% transparent yellow
+Or add `gemini_api_key` to your `overlay.yml`. Get your key from [Google AI Studio](https://makersuite.google.com/app/apikey).
 
 ## Usage
 
-### Build and Run
+### Running
 
 ```bash
-cargo build
-cargo run
+# Use default config (overlay.yml)
+./overlay-x11
+
+# Use custom config file
+./overlay-x11 /path/to/config.yml
 ```
 
-The overlay will:
+### Controls
 
-- Automatically size to 1/4 of your screen (half width × half height)
-- Display screen and overlay dimensions as text
-- Be togglable with **Ctrl+Alt+O**
-- Allow all mouse and keyboard events to pass through
+- **Ctrl+Alt+E**: Toggle overlay visibility
+- **Ctrl+Alt+S**: Take screenshot + AI analysis
+- **Arrow Keys**: Scroll content (when overlay is visible)
+  - Up/Down: Vertical scrolling
+  - Left/Right: Horizontal scrolling
 
-### Customize Configuration
-
-Edit `src/main.rs` and modify the configuration:
-
-```rust
-let config = OverlayConfig::new()
-    .with_position(0, 0)        // Top-left corner
-    .with_size(1920, 1080)      // Full HD size
-    .with_color(0x30000000);    // 19% transparent black
-```
-
-## Requirements
-
-- Linux with X11
-- Rust 1.70+
-- X11 Shape extension (standard on most systems)
-- systemd (for service mode)
-
-## Service Management
-
-### Start/Stop Service
+### Service Management
 
 ```bash
-# Start
+# Start/Stop
 systemctl --user start stealth-overlay.service
-
-# Stop
 systemctl --user stop stealth-overlay.service
-
-# Restart
-systemctl --user restart stealth-overlay.service
 
 # Status
 systemctl --user status stealth-overlay.service
@@ -219,7 +77,56 @@ systemctl --user status stealth-overlay.service
 journalctl --user -u stealth-overlay.service -f
 ```
 
-### Uninstall
+## Configuration
+
+See [CONFIG.md](CONFIG.md) for complete configuration guide including:
+
+- Color formats (ARGB/RGB)
+- Font selection
+- Position and sizing
+- API key configuration
+
+Example `overlay.yml`:
+
+```yaml
+x: 100 # Auto-centers if left at default
+y: 100
+width: 800 # Auto-sizes to 2/3 screen if left at default
+height: 600
+color: 0x80000000 # 50% transparent black
+text_color: 0xFFFFFF
+text_outline_color: 0x000000
+font: "-misc-fixed-medium-r-normal--20-200-75-75-C-100-iso8859-1"
+```
+
+## Build Modes
+
+**Debug Mode** (development):
+
+- Verbose console logging
+- Stealth features disabled
+
+**Release Mode** (production):
+
+- Silent operation
+- Full stealth enabled
+- Process masquerading
+- Window manager evasion
+
+```bash
+# Debug
+cargo build
+
+# Release
+cargo build --release
+```
+
+## Requirements
+
+- Linux with X11 (Linux Mint)
+- systemd (for service mode)
+
+## Uninstall
 
 ```bash
 systemctl --user stop stealth-overlay.service
@@ -229,41 +136,6 @@ rm ~/.config/systemd/user/stealth-overlay.service
 systemctl --user daemon-reload
 ```
 
-## Controls
-
-- **Ctrl+Alt+O**: Toggle overlay visibility
-- **Ctrl+Alt+S**: Take screenshot + AI analysis (updates overlay with Gemini insights)
-- **Ctrl+C**: Exit the application (manual mode only)
-
-## AI-Powered Screenshot Analysis
-
-When you press `Ctrl+Alt+S`:
-
-1. Screenshot is captured (overlay hidden)
-2. Image is sent to Gemini API for analysis
-3. AI provides concise summary of screen content
-4. Overlay updates with the analysis
-
-See [GEMINI.md](GEMINI.md) for detailed setup and configuration.
-
-## Screenshots
-
-Screenshots are saved in the current directory with timestamps:
-
-- Format: `screenshot_<timestamp>.png`
-- Overlay is automatically hidden during capture
-- Uses X11 GetImage to capture the full screen
-- Pure Rust PNG encoding (no external tools)
-
-## Documentation
-
-- [GEMINI.md](GEMINI.md) - AI screenshot analysis setup and usage
-- [STEALTH.md](STEALTH.md) - Complete stealth features documentation
-- [DEBUG_VS_RELEASE.md](DEBUG_VS_RELEASE.md) - Build mode differences
-- [src/config.rs](src/config.rs) - Configuration options
-- [src/renderer.rs](src/renderer.rs) - Rendering API
-- [src/gemini.rs](src/gemini.rs) - Gemini API integration
-
 ## License
 
-This is example code for educational purposes.
+Educational purposes.
