@@ -35,7 +35,11 @@ impl Renderer {
         self
     }
 
-    pub fn with_text(mut self, text: String) -> Self {
+    pub fn with_text(mut self, mut text: String) -> Self {
+        // Ensure text ends with a newline for proper padding
+        if !text.is_empty() && !text.ends_with('\n') {
+            text.push('\n');
+        }
         self.text = text;
         self
     }

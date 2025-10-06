@@ -14,7 +14,7 @@ use config::OverlayConfig;
 use renderer::Renderer;
 
 // X11 keysyms
-const XK_O: u32 = 0x006f; // 'O' key
+const XK_E: u32 = 0x0065; // 'E' key
 const XK_S: u32 = 0x0073; // 'S' key
 const XK_UP: u32 = 0xff52; // Up arrow
 const XK_DOWN: u32 = 0xff54; // Down arrow
@@ -169,8 +169,8 @@ fn main() -> Result<(), Box<dyn Error>> {
         &[], // empty region = fully click-through
     )?;
 
-    // Grab Ctrl+Alt+O/S for overlay toggle and screenshot
-    let keycode_o = get_keycode(&conn, XK_O)?;
+    // Grab Ctrl+Alt+E/S for overlay toggle and screenshot
+    let keycode_e = get_keycode(&conn, XK_E)?;
     let keycode_s = get_keycode(&conn, XK_S)?;
     let keycode_up = get_keycode(&conn, XK_UP)?;
     let keycode_down = get_keycode(&conn, XK_DOWN)?;
@@ -183,7 +183,7 @@ fn main() -> Result<(), Box<dyn Error>> {
         false,           // owner_events
         root,            // grab_window
         modifiers,       // modifiers
-        keycode_o,       // key
+        keycode_e,       // key
         GrabMode::ASYNC, // pointer_mode
         GrabMode::ASYNC, // keyboard_mode
     )?;
@@ -252,7 +252,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     conn.flush()?;
 
     #[cfg(debug_assertions)]
-    println!("Debug: Overlay started. Press Ctrl+Alt+O to toggle, Ctrl+Alt+S to screenshot.");
+    println!("Debug: Overlay started. Press Ctrl+Alt+E to toggle, Ctrl+Alt+S to screenshot.");
 
     // Event loop (silent in release, verbose in debug)
     loop {
@@ -297,7 +297,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 #[cfg(debug_assertions)]
                 println!("Debug: Scrolled right");
             }
-            Some(Event::KeyPress(k)) if k.detail == keycode_o => {
+            Some(Event::KeyPress(k)) if k.detail == keycode_e => {
                 // Check if the modifiers match (Ctrl+Alt)
                 if k.state.contains(ModMask::CONTROL) && k.state.contains(ModMask::M1) {
                     // Toggle visibility
