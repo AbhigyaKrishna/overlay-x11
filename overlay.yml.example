@@ -1,0 +1,39 @@
+# Overlay X11 Configuration File
+# Copy this to overlay.yml and customize
+
+# Window position (pixels from top-left)
+# Default: 100, 100 (will be auto-centered if left at defaults)
+x: 100
+y: 100
+
+# Window dimensions
+# Default: 800x600 (will auto-calculate to 2/3 of screen if left at defaults)
+width: 800
+height: 600
+
+# Colors in hexadecimal format
+# ARGB format for overlay background (includes alpha channel)
+# 0x80000000 = 50% transparent black
+# 0xAAFF0000 = ~67% transparent red
+color: 0x80000000
+
+# Text color (RGB format)
+# 0xFFFFFF = white
+# 0x00FF00 = green
+text_color: 0xFFFFFF
+
+# Text outline/shadow color (RGB format)
+# 0x000000 = black
+# 0xFF0000 = red
+text_outline_color: 0x000000
+
+# X11 font name
+# Use `xlsfonts` command to list available fonts
+# Examples:
+#   -misc-fixed-medium-r-normal--20-200-75-75-C-100-iso8859-1
+#   -misc-fixed-medium-r-normal--15-140-75-75-C-90-iso8859-1
+#   fixed (fallback)
+font: "-misc-fixed-medium-r-normal--20-200-75-75-C-100-iso8859-1"
+
+# Gemini API key (optional, overrides GEMINI_API_KEY environment variable)
+# gemini_api_key: "your-api-key-here"

@@ -1,6 +1,5 @@
 use serde::{Deserialize, Serialize};
 use std::error::Error;
-use std::fs;
 
 const GEMINI_API_URL: &str =
     "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent";
@@ -106,8 +105,16 @@ What do you see in this screenshot and how can you help the user?"#;
     Err("No response from Gemini API".into())
 }
 
-/// Get API key from environment variable
-pub fn get_api_key() -> Result<String, Box<dyn Error>> {
+/// Get API key from config or environment variable
+pub fn get_api_key(config_key: Option<String>) -> Result<String, Box<dyn Error>> {
+    // Try config first
+    if let Some(key) = config_key {
+        if !key.is_empty() {
+            return Ok(key);
+        }
+    }
+
+    // Fall back to environment variable
     std::env::var("GEMINI_API_KEY")
-        .map_err(|_| "GEMINI_API_KEY environment variable not set".into())
+        .map_err(|_| "GEMINI_API_KEY not found in config or environment".into())
 }

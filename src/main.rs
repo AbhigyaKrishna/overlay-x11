@@ -22,6 +22,16 @@ const XK_LEFT: u32 = 0xff51; // Left arrow
 const XK_RIGHT: u32 = 0xff53; // Right arrow
 
 fn main() -> Result<(), Box<dyn Error>> {
+    // Parse command-line arguments
+    let args: Vec<String> = std::env::args().collect();
+    let config_path = args.get(1).cloned();
+
+    // Load configuration from file or use defaults
+    let mut config = OverlayConfig::load(config_path);
+
+    #[cfg(debug_assertions)]
+    println!("Debug: Config loaded: {:?}", config);
+
     // Setup process stealth features only in release builds
     #[cfg(not(debug_assertions))]
     setup_process_stealth()?;
@@ -37,26 +47,32 @@ fn main() -> Result<(), Box<dyn Error>> {
     let screen_width = screen.width_in_pixels;
     let screen_height = screen.height_in_pixels;
 
-    // Calculate overlay size as 2/3 of screen
-    let overlay_width = screen_width * 2 / 3;
-    let overlay_height = screen_height * 2 / 3;
+    // If width/height are still at defaults, calculate as 2/3 of screen
+    if config.width == 800 && config.height == 600 {
+        config.width = screen_width * 2 / 3;
+        config.height = screen_height * 2 / 3;
+    }
 
-    // Create configuration with calculated dimensions
-    let config = OverlayConfig::new()
-        .with_position(100, 100)
-        .with_size(overlay_width, overlay_height)
-        .with_color(0x80000000); // 50% transparent gray
+    // If position is at defaults (100, 100), center the overlay on screen
+    if config.x == 100 && config.y == 100 {
+        config.x = ((screen_width - config.width) / 2) as i16;
+        config.y = ((screen_height - config.height) / 2) as i16;
 
-    // Open a built-in X11 font (larger size)
+        #[cfg(debug_assertions)]
+        println!("Debug: Centering overlay at ({}, {})", config.x, config.y);
+    }
+
+    // Open X11 font from config
     let font_id = conn.generate_id()?;
-    // Try to open a larger fixed-width font (20 pixels), fallback to smaller if not available
-    let font_name = b"-misc-fixed-medium-r-normal--20-200-75-75-C-100-iso8859-1";
-    if conn.open_font(font_id, font_name).is_err() {
+    let font_bytes = config.font.as_bytes();
+    if conn.open_font(font_id, font_bytes).is_err() {
         // Fallback to a medium size
         let fallback = b"-misc-fixed-medium-r-normal--15-140-75-75-C-90-iso8859-1";
         if conn.open_font(font_id, fallback).is_err() {
             // Last resort: simple "fixed" font
             conn.open_font(font_id, b"fixed")?;
+            #[cfg(debug_assertions)]
+            println!("Debug: Using fallback 'fixed' font");
         }
     }
 
@@ -77,8 +93,8 @@ fn main() -> Result<(), Box<dyn Error>> {
     let initial_text = (1..=50)
         .map(|i| {
             format!(
-                "Line #{:03} - Screen: {}x{}, Overlay: {}x{}",
-                i, screen_width, screen_height, overlay_width, overlay_height
+                "Line #{:03} - Screen: {}x{}, Overlay: {}x{} at ({}, {})",
+                i, screen_width, screen_height, config.width, config.height, config.x, config.y
             )
         })
         .collect::<Vec<_>>()
@@ -323,7 +339,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                             #[cfg(debug_assertions)]
                             println!("Debug: Analyzing screenshot with Gemini...");
 
-                            match gemini::get_api_key() {
+                            match gemini::get_api_key(config.gemini_api_key.clone()) {
                                 Ok(api_key) => {
                                     match gemini::analyze_screenshot_data(&png_data, &api_key) {
                                         Ok(analysis) => {
