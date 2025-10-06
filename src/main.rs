@@ -86,7 +86,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     let mut renderer = Renderer::new(config.clone())
         .with_font(font_id, font_ascent, font_descent)
-        .with_text(&conn, initial_text)?
+        .with_text(initial_text)
         .with_scroll_offset(0);
 
     // Find a 32-bit (ARGB) visual for transparency
@@ -334,10 +334,10 @@ fn main() -> Result<(), Box<dyn Error>> {
                                             let current_offset = renderer.scroll_offset();
                                             renderer = Renderer::new(config.clone())
                                                 .with_font(font_id, font_ascent, font_descent)
-                                                .with_text(
-                                                    &conn,
-                                                    format!("Screenshot Analysis:\n\n{}", analysis),
-                                                )?
+                                                .with_text(format!(
+                                                    "Screenshot Analysis:\n\n{}",
+                                                    analysis
+                                                ))
                                                 .with_scroll_offset(current_offset);
 
                                             // Trigger redraw by sending expose event

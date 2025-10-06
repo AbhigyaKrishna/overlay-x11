@@ -8,7 +8,7 @@ use crate::config::OverlayConfig;
 pub struct Renderer {
     config: OverlayConfig,
     font: Option<Font>,
-    lines: Vec<(String, i32)>, // text lines + pixel width
+    text: String,
     font_ascent: u16,
     font_descent: u16,
     scroll_offset: i16,
@@ -20,7 +20,7 @@ impl Renderer {
         Self {
             config,
             font: None,
-            lines: Vec::new(),
+            text: String::new(),
             font_ascent: 0,
             font_descent: 0,
             scroll_offset: 0,
@@ -35,42 +35,9 @@ impl Renderer {
         self
     }
 
-    pub fn with_text(
-        mut self,
-        conn: &RustConnection,
-        text: String,
-    ) -> Result<Self, Box<dyn Error>> {
-        // Break into lines and compute widths using QueryTextExtents
-        let mut lines = Vec::new();
-        if let Some(font) = self.font {
-            for line in text.lines() {
-                let line_bytes = line.as_bytes();
-                if line_bytes.is_empty() {
-                    lines.push((String::new(), 0));
-                    continue;
-                }
-
-                // Query text extents to get precise pixel width
-                // x11rb's query_text_extents expects &[Char2b] for 16-bit chars
-                // For 8-bit text, we need to convert bytes to Char2b
-                let chars: Vec<Char2b> = line_bytes
-                    .iter()
-                    .map(|&b| Char2b { byte1: 0, byte2: b })
-                    .collect();
-
-                let reply = conn.query_text_extents(font, &chars)?.reply()?;
-                // Calculate total width
-                let width = reply.overall_width as i32;
-                lines.push((line.to_string(), width));
-            }
-        } else {
-            // No font set, just store lines with zero width
-            for line in text.lines() {
-                lines.push((line.to_string(), 0));
-            }
-        }
-        self.lines = lines;
-        Ok(self)
+    pub fn with_text(mut self, text: String) -> Self {
+        self.text = text;
+        self
     }
 
     pub fn with_scroll_offset(mut self, offset: i16) -> Self {
@@ -89,21 +56,27 @@ impl Renderer {
 
     pub fn scroll_down(&mut self) {
         let line_height = (self.font_ascent + self.font_descent + 4) as i16;
-        let line_count = self.lines.len() as i16;
+        let line_count = self.text.lines().count() as i16;
         let max_offset = (line_count * line_height) - self.config.height as i16;
         self.scroll_offset = (self.scroll_offset + line_height).min(max_offset.max(0));
     }
 
     pub fn scroll_left(&mut self) {
-        // Scroll left by 100 pixels
-        self.horizontal_scroll_offset = self.horizontal_scroll_offset.saturating_sub(100);
+        // Scroll left by ~10 characters
+        self.horizontal_scroll_offset = (self.horizontal_scroll_offset - 60).max(0);
     }
 
     pub fn scroll_right(&mut self) {
-        // Compute max line width from measured widths
-        let max_width = self.lines.iter().map(|(_, w)| *w).max().unwrap_or(0);
-        let limit = (max_width - self.config.width as i32 + 40).max(0);
-        self.horizontal_scroll_offset = (self.horizontal_scroll_offset + 100).min(limit as i16);
+        // Scroll right by ~10 characters
+        // Find the maximum line length to limit scrolling
+        let max_line_width = self
+            .text
+            .lines()
+            .map(|line| line.len() as i16 * 6)
+            .max()
+            .unwrap_or(0);
+        let max_h_offset = (max_line_width - self.config.width as i16 + 40).max(0);
+        self.horizontal_scroll_offset = (self.horizontal_scroll_offset + 60).min(max_h_offset);
     }
 
     /// Render the overlay on the given window
@@ -128,63 +101,90 @@ impl Renderer {
         )?;
         conn.free_gc(gc_bg)?;
 
-        // Draw text if font is set and we have lines
+        // Draw text if font is set and text is not empty
         if let Some(font) = self.font {
-            if !self.lines.is_empty() {
+            if !self.text.is_empty() {
                 let line_height = (self.font_ascent + self.font_descent) as i16 + 4; // padding
 
                 // Calculate initial y position with scroll offset
                 let base_y = self.font_ascent as i16 + 20 - self.scroll_offset;
 
-                // Draw outline + text in passes
-                for &(dx, dy, color) in &[
-                    (-1, -1, self.config.text_outline_color),
-                    (1, -1, self.config.text_outline_color),
-                    (-1, 1, self.config.text_outline_color),
-                    (1, 1, self.config.text_outline_color),
-                    (0, 0, self.config.text_color),
-                ] {
-                    let gc = conn.generate_id()?;
-                    conn.create_gc(gc, window, &CreateGCAux::new().foreground(color).font(font))?;
+                // Draw outline/shadow in 4 directions
+                for &(dx, dy) in &[(-1, -1), (1, -1), (-1, 1), (1, 1)] {
+                    let gc_outline = conn.generate_id()?;
+                    conn.create_gc(
+                        gc_outline,
+                        window,
+                        &CreateGCAux::new()
+                            .foreground(self.config.text_outline_color)
+                            .background(self.config.color)
+                            .font(font),
+                    )?;
 
                     let mut y = base_y;
-                    for (line, width) in &self.lines {
-                        // Vertical clipping: check if any part of the text line is visible
+                    for line in self.text.lines() {
+                        // Check if any part of the text line is visible
+                        // Text extends from (y - ascent) to (y + descent)
                         let text_top = y - self.font_ascent as i16;
                         let text_bottom = y + self.font_descent as i16;
-
                         if text_bottom >= 0 && text_top < self.config.height as i16 {
-                            // Horizontal clipping: only draw if line extends beyond scroll offset
-                            if *width as i16 > self.horizontal_scroll_offset {
-                                let x_pos = 20 - self.horizontal_scroll_offset + dx;
-
-                                // image_text8 has a max length of 255 bytes, split long lines
-                                let line_bytes = line.as_bytes();
-                                let mut x_offset = x_pos;
-
-                                for chunk in line_bytes.chunks(255) {
-                                    // Only draw chunks that are at least partially visible
-                                    if x_offset < self.config.width as i16 && x_offset + 100 > 0 {
-                                        conn.image_text8(window, gc, x_offset, y + dy, chunk)?;
-                                    }
-                                    // Query chunk width for accurate positioning
-                                    if !chunk.is_empty() {
-                                        let chars: Vec<Char2b> = chunk
-                                            .iter()
-                                            .map(|&b| Char2b { byte1: 0, byte2: b })
-                                            .collect();
-                                        let chunk_reply =
-                                            conn.query_text_extents(font, &chars)?.reply()?;
-                                        x_offset += chunk_reply.overall_width as i16;
-                                    }
+                            // image_text8 has a max length of 255 bytes, split long lines
+                            let line_bytes = line.as_bytes();
+                            let mut x_offset = 20i16 - self.horizontal_scroll_offset;
+                            for chunk in line_bytes.chunks(255) {
+                                if x_offset + (chunk.len() as i16 * 6) > 0
+                                    && x_offset < self.config.width as i16
+                                {
+                                    conn.image_text8(
+                                        window,
+                                        gc_outline,
+                                        x_offset + dx,
+                                        y + dy,
+                                        chunk,
+                                    )?;
                                 }
+                                x_offset += chunk.len() as i16 * 6;
                             }
                         }
                         y += line_height;
                     }
-
-                    conn.free_gc(gc)?;
+                    conn.free_gc(gc_outline)?;
                 }
+
+                // Draw main text on top
+                let gc_text = conn.generate_id()?;
+                conn.create_gc(
+                    gc_text,
+                    window,
+                    &CreateGCAux::new()
+                        .foreground(self.config.text_color)
+                        .background(self.config.color)
+                        .font(font),
+                )?;
+
+                let mut y = base_y;
+                for line in self.text.lines() {
+                    // Check if any part of the text line is visible
+                    let text_top = y - self.font_ascent as i16;
+                    let text_bottom = y + self.font_descent as i16;
+                    if text_bottom >= 0 && text_top < self.config.height as i16 {
+                        // image_text8 has a max length of 255 bytes, split long lines
+                        let line_bytes = line.as_bytes();
+                        let mut x_offset = 20i16 - self.horizontal_scroll_offset;
+                        for chunk in line_bytes.chunks(255) {
+                            if x_offset + (chunk.len() as i16 * 6) > 0
+                                && x_offset < self.config.width as i16
+                            {
+                                conn.image_text8(window, gc_text, x_offset, y, chunk)?;
+                            }
+                            // Calculate approximate width of this chunk to offset next chunk
+                            // Using average character width (this is approximate)
+                            x_offset += (chunk.len() as i16) * 6; // Rough estimate for fixed font
+                        }
+                    }
+                    y += line_height;
+                }
+                conn.free_gc(gc_text)?;
             }
         }
 
