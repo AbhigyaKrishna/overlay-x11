@@ -3,9 +3,6 @@
 
 set -e
 
-echo "Building stealth overlay in release mode..."
-cargo build --release
-
 echo "Installing binary..."
 mkdir -p ~/.local/bin
 cp target/release/overlay-x11 ~/.local/bin/stealth-overlay
