@@ -10,10 +10,6 @@ RestartSec=5
 Environment=DISPLAY=:0
 Environment=XAUTHORITY=%h/.Xauthority
 
-# Hide from process lists
-User=%i
-Group=%i
-
 # Security settings
 NoNewPrivileges=true
 PrivateTmp=true
