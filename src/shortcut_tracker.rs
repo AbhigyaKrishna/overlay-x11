@@ -3,49 +3,364 @@ use std::collections::HashSet;
 use std::time::{Duration, Instant};
 use x11rb::protocol::xproto::Keycode;
 
-/// Unified key state and shortcut combination tracker
+/// State machine states for shortcut detection
+#[derive(Debug, Clone, PartialEq)]
+enum ShortcutState {
+    Idle,
+    ModifiersPressed {
+        ctrl: bool,
+        shift: bool,
+        alt: bool,
+        timestamp: Instant,
+    },
+    AwaitingTargetKey {
+        ctrl: bool,
+        shift: bool,
+        alt: bool,
+        timestamp: Instant,
+    },
+    Complete {
+        shortcut_type: ShortcutType,
+        timestamp: Instant,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq)]
+enum ShortcutType {
+    CtrlShiftE,
+    CtrlShiftQ,
+    CtrlQ,
+    CtrlAltE,
+}
+
+/// State machine-based keyboard shortcut tracker
 pub struct ShortcutTracker {
     // Key state tracking
     pressed_keys: HashSet<Keycode>,
 
+    // State machine
+    state: ShortcutState,
+
     // Modifier keycodes
-    ctrl_keycode: Option<u8>,
-    shift_keycode: Option<u8>,
-    alt_keycode: Option<u8>,
+    ctrl_keycodes: Vec<Keycode>,
+    shift_keycodes: Vec<Keycode>,
+    alt_keycodes: Vec<Keycode>,
 
-    // Timing and debouncing
-    last_combo_time: Instant,
-    combo_timeout: Duration,
+    // Target key keycodes
+    keycode_e: Option<Keycode>,
+    keycode_q: Option<Keycode>,
 
-    // Track recent modifier presses for timing tolerance
-    recent_ctrl: Option<Instant>,
-    recent_shift: Option<Instant>,
-    recent_alt: Option<Instant>,
+    // Configuration
+    modifier_timeout: Duration, // How long to wait for target key after modifiers
+    debounce_timeout: Duration, // Minimum time between shortcut activations
 }
 
 impl ShortcutTracker {
     pub fn new() -> Self {
         Self {
             pressed_keys: HashSet::new(),
-            ctrl_keycode: None,
-            shift_keycode: None,
-            alt_keycode: None,
-            last_combo_time: Instant::now(),
-            combo_timeout: Duration::from_millis(500), // 500ms window for combinations
-            recent_ctrl: None,
-            recent_shift: None,
-            recent_alt: None,
+            state: ShortcutState::Idle,
+            ctrl_keycodes: vec![37, 105], // Left Ctrl, Right Ctrl
+            shift_keycodes: vec![50, 62], // Left Shift, Right Shift
+            alt_keycodes: vec![64, 108],  // Left Alt, Right Alt
+            keycode_e: None,
+            keycode_q: None,
+            modifier_timeout: Duration::from_millis(800), // Generous timeout
+            debounce_timeout: Duration::from_millis(300), // Prevent rapid triggers
         }
     }
 
     /// Track key press event
     pub fn key_pressed(&mut self, keycode: Keycode) {
         self.pressed_keys.insert(keycode);
+        self.update_state_machine();
     }
 
     /// Track key release event
     pub fn key_released(&mut self, keycode: Keycode) {
         self.pressed_keys.remove(&keycode);
+        self.update_state_machine();
+    }
+
+    /// Main state machine logic
+    fn update_state_machine(&mut self) {
+        let now = Instant::now();
+
+        // Check current modifier states
+        let ctrl_pressed = self.is_ctrl_pressed();
+        let shift_pressed = self.is_shift_pressed();
+        let alt_pressed = self.is_alt_pressed();
+
+        match &self.state {
+            ShortcutState::Idle => {
+                // Transition to ModifiersPressed if any modifier is held
+                if ctrl_pressed || shift_pressed || alt_pressed {
+                    #[cfg(debug_assertions)]
+                    println!(
+                        "State: Idle → ModifiersPressed (ctrl={}, shift={}, alt={})",
+                        ctrl_pressed, shift_pressed, alt_pressed
+                    );
+
+                    self.state = ShortcutState::ModifiersPressed {
+                        ctrl: ctrl_pressed,
+                        shift: shift_pressed,
+                        alt: alt_pressed,
+                        timestamp: now,
+                    };
+                }
+            }
+
+            ShortcutState::ModifiersPressed {
+                ctrl,
+                shift,
+                alt,
+                timestamp,
+            } => {
+                // Check if modifiers have been released (go back to idle)
+                if !ctrl_pressed && !shift_pressed && !alt_pressed {
+                    #[cfg(debug_assertions)]
+                    println!("State: ModifiersPressed → Idle (all modifiers released)");
+
+                    self.state = ShortcutState::Idle;
+                    return;
+                }
+
+                // Check if modifier combination has stabilized
+                if ctrl_pressed == *ctrl && shift_pressed == *shift && alt_pressed == *alt {
+                    // Same combination for stability check - transition to awaiting target
+                    if now.duration_since(*timestamp) > Duration::from_millis(50) {
+                        #[cfg(debug_assertions)]
+                        println!("State: ModifiersPressed → AwaitingTargetKey (stable for 50ms)");
+
+                        self.state = ShortcutState::AwaitingTargetKey {
+                            ctrl: ctrl_pressed,
+                            shift: shift_pressed,
+                            alt: alt_pressed,
+                            timestamp: now,
+                        };
+                    }
+                } else {
+                    // Modifier combination changed - update the state
+                    #[cfg(debug_assertions)]
+                    println!(
+                        "State: ModifiersPressed (combination changed: ctrl={}, shift={}, alt={})",
+                        ctrl_pressed, shift_pressed, alt_pressed
+                    );
+
+                    self.state = ShortcutState::ModifiersPressed {
+                        ctrl: ctrl_pressed,
+                        shift: shift_pressed,
+                        alt: alt_pressed,
+                        timestamp: now,
+                    };
+                }
+            }
+
+            ShortcutState::AwaitingTargetKey {
+                ctrl,
+                shift,
+                alt,
+                timestamp,
+            } => {
+                // Check for timeout
+                if now.duration_since(*timestamp) > self.modifier_timeout {
+                    #[cfg(debug_assertions)]
+                    println!("State: AwaitingTargetKey → Idle (timeout)");
+
+                    self.state = ShortcutState::Idle;
+                    return;
+                }
+
+                // Check if modifiers are still pressed
+                if ctrl_pressed != *ctrl || shift_pressed != *shift || alt_pressed != *alt {
+                    #[cfg(debug_assertions)]
+                    println!("State: AwaitingTargetKey → Idle (modifier state changed)");
+
+                    self.state = ShortcutState::Idle;
+                    return;
+                }
+
+                // Check for target keys (non-modifiers that were just pressed)
+                let non_modifier_keys: HashSet<_> = self
+                    .pressed_keys
+                    .iter()
+                    .filter(|&&k| !self.is_modifier_key(k))
+                    .cloned()
+                    .collect();
+
+                if !non_modifier_keys.is_empty() {
+                    // Target key(s) pressed - determine shortcut type
+                    if let Some(shortcut_type) =
+                        self.determine_shortcut_type(*ctrl, *shift, *alt, &non_modifier_keys)
+                    {
+                        #[cfg(debug_assertions)]
+                        println!("State: AwaitingTargetKey → Complete ({:?})", shortcut_type);
+
+                        self.state = ShortcutState::Complete {
+                            shortcut_type,
+                            timestamp: now,
+                        };
+                    } else {
+                        // Unknown combination - back to idle
+                        #[cfg(debug_assertions)]
+                        println!("State: AwaitingTargetKey → Idle (unknown target key)");
+
+                        self.state = ShortcutState::Idle;
+                    }
+                }
+            }
+
+            ShortcutState::Complete { timestamp, .. } => {
+                // Auto-reset after debounce period
+                if now.duration_since(*timestamp) > self.debounce_timeout {
+                    #[cfg(debug_assertions)]
+                    println!("State: Complete → Idle (debounce period ended)");
+
+                    self.state = ShortcutState::Idle;
+                }
+            }
+        }
+    }
+
+    /// Check if specific shortcut combinations are active
+    pub fn check_ctrl_shift_e(&mut self, _keycode_e: u8) -> bool {
+        matches!(
+            self.state,
+            ShortcutState::Complete {
+                shortcut_type: ShortcutType::CtrlShiftE,
+                ..
+            }
+        )
+    }
+
+    pub fn check_ctrl_shift_q(&mut self, _keycode_q: u8) -> bool {
+        matches!(
+            self.state,
+            ShortcutState::Complete {
+                shortcut_type: ShortcutType::CtrlShiftQ,
+                ..
+            }
+        )
+    }
+
+    pub fn check_ctrl_q(&mut self, _keycode_q: u8) -> bool {
+        matches!(
+            self.state,
+            ShortcutState::Complete {
+                shortcut_type: ShortcutType::CtrlQ,
+                ..
+            }
+        )
+    }
+
+    pub fn check_ctrl_alt_e(&mut self, _keycode_e: u8) -> bool {
+        matches!(
+            self.state,
+            ShortcutState::Complete {
+                shortcut_type: ShortcutType::CtrlAltE,
+                ..
+            }
+        )
+    }
+
+    /// Helper functions
+    fn is_ctrl_pressed(&self) -> bool {
+        self.ctrl_keycodes
+            .iter()
+            .any(|&k| self.pressed_keys.contains(&k))
+    }
+
+    fn is_shift_pressed(&self) -> bool {
+        self.shift_keycodes
+            .iter()
+            .any(|&k| self.pressed_keys.contains(&k))
+    }
+
+    fn is_alt_pressed(&self) -> bool {
+        self.alt_keycodes
+            .iter()
+            .any(|&k| self.pressed_keys.contains(&k))
+    }
+
+    fn is_modifier_key(&self, keycode: Keycode) -> bool {
+        self.ctrl_keycodes.contains(&keycode)
+            || self.shift_keycodes.contains(&keycode)
+            || self.alt_keycodes.contains(&keycode)
+    }
+
+    fn determine_shortcut_type(
+        &self,
+        ctrl: bool,
+        shift: bool,
+        alt: bool,
+        target_keys: &HashSet<Keycode>,
+    ) -> Option<ShortcutType> {
+        if target_keys.len() == 1 {
+            let target = *target_keys.iter().next().unwrap();
+            let keycode_e = self.keycode_e.unwrap_or(26); // Fallback to typical E key
+            let keycode_q = self.keycode_q.unwrap_or(24); // Fallback to typical Q key
+
+            match (ctrl, shift, alt, target) {
+                (true, true, false, k) if k == keycode_e => Some(ShortcutType::CtrlShiftE),
+                (true, true, false, k) if k == keycode_q => Some(ShortcutType::CtrlShiftQ),
+                (true, false, false, k) if k == keycode_q => Some(ShortcutType::CtrlQ),
+                (true, false, true, k) if k == keycode_e => Some(ShortcutType::CtrlAltE),
+                _ => None,
+            }
+        } else {
+            None // Multiple target keys not supported
+        }
+    }
+
+    /// Update keycodes from modifier mapper
+    pub fn update_keycodes(&mut self, modifier_mapper: &ModifierMapper) {
+        // Update with detected keycodes
+        if let Some(ctrl) = modifier_mapper.get_keycode(0xffe3) {
+            if !self.ctrl_keycodes.contains(&ctrl) {
+                self.ctrl_keycodes.push(ctrl);
+            }
+        }
+        if let Some(ctrl_r) = modifier_mapper.get_keycode(0xffe4) {
+            if !self.ctrl_keycodes.contains(&ctrl_r) {
+                self.ctrl_keycodes.push(ctrl_r);
+            }
+        }
+
+        if let Some(shift) = modifier_mapper.get_keycode(0xffe1) {
+            if !self.shift_keycodes.contains(&shift) {
+                self.shift_keycodes.push(shift);
+            }
+        }
+        if let Some(shift_r) = modifier_mapper.get_keycode(0xffe2) {
+            if !self.shift_keycodes.contains(&shift_r) {
+                self.shift_keycodes.push(shift_r);
+            }
+        }
+
+        if let Some(alt) = modifier_mapper.get_keycode(0xffe9) {
+            if !self.alt_keycodes.contains(&alt) {
+                self.alt_keycodes.push(alt);
+            }
+        }
+        if let Some(alt_r) = modifier_mapper.get_keycode(0xffea) {
+            if !self.alt_keycodes.contains(&alt_r) {
+                self.alt_keycodes.push(alt_r);
+            }
+        }
+
+        // Store target keycodes
+        self.keycode_e = modifier_mapper.get_keycode(0x0065); // E key
+        self.keycode_q = modifier_mapper.get_keycode(0x0071); // Q key
+
+        #[cfg(debug_assertions)]
+        println!(
+            "Updated keycodes: ctrl={:?}, shift={:?}, alt={:?}, e={:?}, q={:?}",
+            self.ctrl_keycodes,
+            self.shift_keycodes,
+            self.alt_keycodes,
+            self.keycode_e,
+            self.keycode_q
+        );
     }
 
     /// Get currently pressed keys
@@ -53,209 +368,58 @@ impl ShortcutTracker {
         self.pressed_keys.iter().copied().collect()
     }
 
-    /// Clear all key states
+    /// Cleanup functions
     pub fn clear_all_keys(&mut self) {
         self.pressed_keys.clear();
+        self.state = ShortcutState::Idle;
 
         #[cfg(debug_assertions)]
-        println!("Debug: All key states cleared");
+        println!("State: → Idle (manual reset)");
     }
 
-    /// Periodic cleanup to prevent stuck keys
     pub fn cleanup_stale_keys(&mut self) {
-        if self.pressed_keys.len() > 3 {
-            self.pressed_keys.clear();
-            println!("Cleaned up potentially stuck keys");
-        }
-    }
-
-    /// Reset modifier states for clean detection
-    pub fn reset_modifier_states(&mut self) {
-        self.recent_ctrl = None;
-        self.recent_shift = None;
-        self.recent_alt = None;
-        self.last_combo_time = Instant::now();
-
-        #[cfg(debug_assertions)]
-        println!("Debug: Modifier states reset");
-    }
-
-    /// Update keycodes from modifier mapper
-    pub fn update_keycodes(&mut self, modifier_mapper: &ModifierMapper) {
-        // Get standard modifier keycodes
-        self.ctrl_keycode = modifier_mapper
-            .get_keycode(0xffe3)
-            .or_else(|| modifier_mapper.get_keycode(0xffe4));
-        self.shift_keycode = modifier_mapper
-            .get_keycode(0xffe1)
-            .or_else(|| modifier_mapper.get_keycode(0xffe2));
-        self.alt_keycode = Some(64); // Use the actual Alt keycode we detected
-
-        // If Shift keycode is not detected, use common defaults
-        if self.shift_keycode.is_none() {
-            self.shift_keycode = Some(50); // Common Shift_L keycode
-        }
-
-        #[cfg(debug_assertions)]
-        println!(
-            "Debug: ShortcutTracker keycodes - ctrl={:?}, shift={:?}, alt={:?}",
-            self.ctrl_keycode, self.shift_keycode, self.alt_keycode
-        );
-    }
-
-    /// Get ctrl keycode
-    pub fn ctrl_keycode(&self) -> Option<u8> {
-        self.ctrl_keycode
-    }
-
-    /// Get shift keycode
-    pub fn shift_keycode(&self) -> Option<u8> {
-        self.shift_keycode
-    }
-
-    /// Get alt keycode
-    pub fn alt_keycode(&self) -> Option<u8> {
-        self.alt_keycode
-    }
-
-    /// Check if a specific combination is pressed
-    fn check_combination(
-        &mut self,
-        target_key: u8,
-        need_ctrl: bool,
-        need_shift: bool,
-        need_alt: bool,
-    ) -> bool {
-        let now = Instant::now();
-
-        let pressed_keys: Vec<u8> = self.pressed_keys.iter().copied().collect();
-
-        // Check if target key is pressed
-        if !pressed_keys.contains(&target_key) {
-            return false;
-        }
-
-        // FIX 1: More generous timing window for robust detection
-        let timing_tolerance = Duration::from_millis(250); // Increased for better reliability
-
-        // Update recent modifier timestamps with multiple keycode support
-        if let Some(ctrl_key) = self.ctrl_keycode {
-            if pressed_keys.contains(&ctrl_key)
-                || pressed_keys.contains(&37)
-                || pressed_keys.contains(&105)
-            {
-                self.recent_ctrl = Some(now);
-            }
-        }
-
-        if let Some(shift_key) = self.shift_keycode {
-            if pressed_keys.contains(&shift_key)
-                || pressed_keys.contains(&50)
-                || pressed_keys.contains(&62)
-            {
-                self.recent_shift = Some(now);
-            }
-        }
-
-        if let Some(alt_key) = self.alt_keycode {
-            if pressed_keys.contains(&alt_key)
-                || pressed_keys.contains(&64)
-                || pressed_keys.contains(&108)
-            {
-                self.recent_alt = Some(now);
-            }
-        }
-
-        let mut has_ctrl = false;
-        let mut has_shift = false;
-        let mut has_alt = false;
-
-        // FIX 2: More robust modifier checking with multiple keycode support
-        if need_ctrl {
-            has_ctrl = self.ctrl_keycode.map_or(false, |k| pressed_keys.contains(&k))
-                || pressed_keys.contains(&37) || pressed_keys.contains(&105) // Left/Right Ctrl
-                || self.recent_ctrl.map_or(false, |t| now.duration_since(t) < timing_tolerance);
-        }
-
-        if need_shift {
-            has_shift = self.shift_keycode.map_or(false, |k| pressed_keys.contains(&k))
-                || pressed_keys.contains(&50) || pressed_keys.contains(&62) // Left/Right Shift
-                || self.recent_shift.map_or(false, |t| now.duration_since(t) < timing_tolerance);
-
+        if self.pressed_keys.len() > 8 {
             #[cfg(debug_assertions)]
-            if need_shift {
-                let shift_currently = self
-                    .shift_keycode
-                    .map_or(false, |k| pressed_keys.contains(&k))
-                    || pressed_keys.contains(&50)
-                    || pressed_keys.contains(&62);
-                let shift_recent = self
-                    .recent_shift
-                    .map_or(false, |t| now.duration_since(t) < timing_tolerance);
-                println!(
-                    "Debug: Shift check - currently={}, recent={}, combined={}",
-                    shift_currently, shift_recent, has_shift
-                );
-            }
-        }
-
-        if need_alt {
-            has_alt = self.alt_keycode.map_or(false, |k| pressed_keys.contains(&k))
-                || pressed_keys.contains(&64) || pressed_keys.contains(&108) // Left/Right Alt
-                || self.recent_alt.map_or(false, |t| now.duration_since(t) < timing_tolerance);
-        }
-
-        // Check if we have the required combination
-        let combo_match =
-            (!need_ctrl || has_ctrl) && (!need_shift || has_shift) && (!need_alt || has_alt);
-
-        #[cfg(debug_assertions)]
-        if combo_match {
             println!(
-                "Debug: Combination matched! ctrl={}, shift={}, alt={}",
-                has_ctrl, has_shift, has_alt
+                "Warning: Too many pressed keys ({}), performing cleanup",
+                self.pressed_keys.len()
             );
+
+            self.clear_all_keys();
         }
+    }
 
-        if combo_match {
-            // FIX 3: Robust debounce time to prevent rapid triggering and ensure clean detection
-            if now.duration_since(self.last_combo_time) > Duration::from_millis(500) {
-                // Increased for robustness
-                self.last_combo_time = now;
-
-                #[cfg(debug_assertions)]
-                println!("Debug: Shortcut accepted after debounce period");
-
-                return true;
-            } else {
-                #[cfg(debug_assertions)]
-                println!(
-                    "Debug: Shortcut blocked by debounce ({}ms ago)",
-                    now.duration_since(self.last_combo_time).as_millis()
-                );
+    pub fn reset_modifier_states(&mut self) {
+        // Only reset if we're in a state that might be stuck
+        match self.state {
+            ShortcutState::Complete { timestamp, .. } => {
+                if timestamp.elapsed() > Duration::from_secs(2) {
+                    self.state = ShortcutState::Idle;
+                    #[cfg(debug_assertions)]
+                    println!("State: Complete → Idle (forced reset - stuck state)");
+                }
             }
+            ShortcutState::AwaitingTargetKey { timestamp, .. } => {
+                if timestamp.elapsed() > Duration::from_secs(5) {
+                    self.state = ShortcutState::Idle;
+                    #[cfg(debug_assertions)]
+                    println!("State: AwaitingTargetKey → Idle (forced reset - stuck state)");
+                }
+            }
+            _ => {} // Don't interfere with normal state transitions
         }
-
-        false
     }
 
-    /// Check for Ctrl+Shift+E combination
-    pub fn check_ctrl_shift_e(&mut self, keycode_e: u8) -> bool {
-        self.check_combination(keycode_e, true, true, false)
+    /// Getters for compatibility
+    pub fn ctrl_keycode(&self) -> Option<Keycode> {
+        self.ctrl_keycodes.first().copied()
     }
 
-    /// Check for Ctrl+Shift+Q combination
-    pub fn check_ctrl_shift_q(&mut self, keycode_q: u8) -> bool {
-        self.check_combination(keycode_q, true, true, false)
+    pub fn shift_keycode(&self) -> Option<Keycode> {
+        self.shift_keycodes.first().copied()
     }
 
-    /// Check for Ctrl+Q combination
-    pub fn check_ctrl_q(&mut self, keycode_q: u8) -> bool {
-        self.check_combination(keycode_q, true, false, false)
-    }
-
-    /// Check for Ctrl+Alt+E combination
-    pub fn check_ctrl_alt_e(&mut self, keycode_e: u8) -> bool {
-        self.check_combination(keycode_e, true, false, true)
+    pub fn alt_keycode(&self) -> Option<Keycode> {
+        self.alt_keycodes.first().copied()
     }
 }
