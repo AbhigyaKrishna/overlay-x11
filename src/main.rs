@@ -35,15 +35,8 @@ fn main() -> Result<(), Box<dyn Error>> {
     // Load configuration from file or use defaults
     let mut config = OverlayConfig::load(config_path);
 
-    #[cfg(debug_assertions)]
-    println!("Debug: Config loaded: {:?}", config);
-
-    // Setup process stealth features only in release builds
     #[cfg(not(debug_assertions))]
     setup_process_stealth()?;
-
-    #[cfg(debug_assertions)]
-    println!("Debug mode: Starting overlay (stealth disabled)");
     // Connect to the X server
     let (conn, screen_num) = RustConnection::connect(None)?;
     let screen = &conn.setup().roots[screen_num];
@@ -63,22 +56,15 @@ fn main() -> Result<(), Box<dyn Error>> {
     if config.x == 100 && config.y == 100 {
         config.x = ((screen_width - config.width) / 2) as i16;
         config.y = ((screen_height - config.height) / 2) as i16;
-
-        #[cfg(debug_assertions)]
-        println!("Debug: Centering overlay at ({}, {})", config.x, config.y);
     }
 
     // Open X11 font from config
     let font_id = conn.generate_id()?;
     let font_bytes = config.font.as_bytes();
     if conn.open_font(font_id, font_bytes).is_err() {
-        // Fallback to a medium size
         let fallback = b"-misc-fixed-medium-r-normal--15-140-75-75-C-90-iso8859-1";
         if conn.open_font(font_id, fallback).is_err() {
-            // Last resort: simple "fixed" font
             conn.open_font(font_id, b"fixed")?;
-            #[cfg(debug_assertions)]
-            println!("Debug: Using fallback 'fixed' font");
         }
     }
 
@@ -87,15 +73,6 @@ fn main() -> Result<(), Box<dyn Error>> {
     let font_ascent = font_info.font_ascent as u16;
     let font_descent = font_info.font_descent as u16;
 
-    #[cfg(debug_assertions)]
-    println!(
-        "Font metrics: ascent={}, descent={}, line_height={}",
-        font_ascent,
-        font_descent,
-        font_ascent + font_descent
-    );
-
-    // Initialize renderer with font, metrics, and multi-line text for scrolling demo
     let initial_text = (1..=50)
         .map(|i| {
             format!(
@@ -151,12 +128,6 @@ fn main() -> Result<(), Box<dyn Error>> {
     #[cfg(not(debug_assertions))]
     hide_from_window_manager(&conn, win)?;
 
-    #[cfg(debug_assertions)]
-    println!(
-        "Debug: Window created at {}x{} with size {}x{}",
-        config.x, config.y, config.width, config.height
-    );
-
     // Raise above all windows
     conn.configure_window(win, &ConfigureWindowAux::new().stack_mode(StackMode::ABOVE))?;
 
@@ -182,12 +153,8 @@ fn main() -> Result<(), Box<dyn Error>> {
     println!("Debug: ModifierMapper initialized");
 
     // Use evdev monitoring for system-level stealth (no grabbing)
-    let evdev_monitor = match EvdevMonitor::new() {
-        Ok(monitor) => {
-            #[cfg(debug_assertions)]
-            println!("Debug: Using evdev monitoring (no grabbing, fully transparent)");
-            Some(monitor)
-        }
+    let mut evdev_monitor = match EvdevMonitor::new() {
+        Ok(monitor) => Some(monitor),
         Err(e) => {
             #[cfg(debug_assertions)]
             eprintln!(
@@ -217,15 +184,6 @@ fn main() -> Result<(), Box<dyn Error>> {
         .get_keycode(XK_RIGHT)
         .ok_or("Right key not found")?;
 
-    #[cfg(debug_assertions)]
-    println!(
-        "Debug: Keycodes mapped - E={}, Q={}, Up={}, Down={}, Left={}, Right={}",
-        keycode_e, keycode_q, keycode_up, keycode_down, keycode_left, keycode_right
-    );
-
-    // Also log the Q keycode specifically for debugging
-    println!("Q key mapped to keycode: {}", keycode_q);
-
     // Track key states and shortcuts with unified tracker
     let mut shortcut_tracker = ShortcutTracker::new();
     shortcut_tracker.update_keycodes(&modifier_mapper); // Add periodic cleanup timer
@@ -239,11 +197,6 @@ fn main() -> Result<(), Box<dyn Error>> {
     conn.map_window(win)?;
     conn.flush()?;
 
-    #[cfg(debug_assertions)]
-    println!(
-        "Debug: Overlay started. Press Ctrl+Shift+E to toggle, Ctrl+Shift+Q or Ctrl+Q to screenshot."
-    );
-
     println!("=== OVERLAY CONTROLS ===");
     println!("Toggle Overlay: Hold Ctrl + Shift, then press E");
     println!("Screenshot + AI: Hold Ctrl + Shift + Q  OR  Hold Ctrl + Q");
@@ -253,25 +206,16 @@ fn main() -> Result<(), Box<dyn Error>> {
     // Event loop - handle both XInput2 raw events and evdev events
     loop {
         // Periodic cleanup to prevent stuck modifier states (every 10 seconds)
-        if last_cleanup.elapsed() >= Duration::from_secs(10) {
+        if last_cleanup.elapsed() > Duration::from_secs(5) {
             shortcut_tracker.cleanup_stale_keys();
             shortcut_tracker.reset_modifier_states();
             last_cleanup = std::time::Instant::now();
-
-            #[cfg(debug_assertions)]
-            println!("Debug: Periodic cleanup performed - preventing stuck key states");
         }
 
         // Handle evdev events if available
         if let Some(ref evdev) = evdev_monitor {
             while let Some(ev) = evdev.try_recv() {
                 let x11_keycode = evdev_monitor::evdev_to_x11_keycode(ev.keycode);
-
-                #[cfg(debug_assertions)]
-                println!(
-                    "Debug: Evdev event - code={}, x11_keycode={}, pressed={}",
-                    ev.keycode, x11_keycode, ev.pressed
-                );
 
                 if ev.pressed {
                     shortcut_tracker.key_pressed(x11_keycode);
@@ -315,9 +259,6 @@ fn main() -> Result<(), Box<dyn Error>> {
                 renderer.render(&conn, win)?;
             }
             Some(Event::MappingNotify(_)) => {
-                // Keyboard layout changed, refresh modifier mapping
-                #[cfg(debug_assertions)]
-                println!("Debug: Keyboard mapping changed, refreshing...");
                 modifier_mapper.refresh(&conn)?;
             }
             _ => {
@@ -355,22 +296,13 @@ fn handle_key_event(
 ) -> Result<bool, Box<dyn Error>> {
     // Only process shortcut combinations on key press events
     if !pressed {
-        // Reset modifier tracking when any modifier key is released for clean state
-        if keycode == shortcut_tracker.ctrl_keycode().unwrap_or(0) ||
-           keycode == shortcut_tracker.shift_keycode().unwrap_or(0) ||
-           keycode == shortcut_tracker.alt_keycode().unwrap_or(0) ||
-           keycode == 37 || keycode == 105 || // Ctrl keycodes
-           keycode == 50 || keycode == 62 || // Shift keycodes
-           keycode == 64 || keycode == 108
+        if keycode == shortcut_tracker.ctrl_keycode().unwrap_or(0)
+            || keycode == shortcut_tracker.shift_keycode().unwrap_or(0)
+            || keycode == 37
+            || keycode == 105
+            || keycode == 50
+            || keycode == 62
         {
-            // Alt keycodes
-
-            #[cfg(debug_assertions)]
-            println!(
-                "Debug: Modifier key {} released, resetting states for clean detection",
-                keycode
-            );
-
             shortcut_tracker.reset_modifier_states();
         }
         return Ok(false);
@@ -382,39 +314,9 @@ fn handle_key_event(
     if pressed_keys.len() > 6 {
         shortcut_tracker.reset_modifier_states();
         shortcut_tracker.clear_all_keys();
-        #[cfg(debug_assertions)]
-        println!(
-            "Warn: Excessive keys detected ({}), performing cleanup",
-            pressed_keys.len()
-        );
         return Ok(false);
     }
 
-    #[cfg(debug_assertions)]
-    println!(
-        "Debug: Key pressed - keycode={}, E={}, Q={}",
-        keycode, keycode_e, keycode_q
-    );
-
-    #[cfg(debug_assertions)]
-    println!("Debug: Currently pressed keys: {:?}", pressed_keys);
-
-    // Show which specific key was just pressed
-    if keycode == keycode_e {
-        println!("Key: E key pressed!");
-    } else if keycode == keycode_q {
-        println!("Key: Q key pressed!");
-    } else if keycode == 37 {
-        // Ctrl
-        println!("Key: Ctrl key pressed!");
-    } else if keycode == 50 {
-        // Shift
-        println!("Key: Shift key pressed!");
-    } else {
-        println!("Key: {} pressed", keycode);
-    }
-
-    // Show user-friendly key detection info
     if pressed_keys.len() > 1 {
         let mut detected_mods = Vec::new();
 
@@ -434,81 +336,29 @@ fn handle_key_event(
         {
             detected_mods.push("Shift");
         }
-
-        if shortcut_tracker
-            .alt_keycode()
-            .map_or(false, |k| pressed_keys.contains(&k))
-        {
-            detected_mods.push("Alt");
-        }
-
-        if !detected_mods.is_empty() {
-            let mods_str = detected_mods.join(" + ");
-            println!("Detected modifiers: {}", mods_str);
-
-            // Show helpful hints
-            if mods_str == "Ctrl + Shift" {
-                println!("Hint: Perfect! Now press E (toggle) or S (screenshot)");
-            }
-        }
     }
 
     // Check for Ctrl+Shift+E (toggle overlay)
     if shortcut_tracker.check_ctrl_shift_e(keycode_e) {
-        println!("Ctrl+Shift+E detected! Toggling overlay...");
-
-        // FIX 7: Reset states immediately after detection
         shortcut_tracker.reset_modifier_states();
 
         if *visible {
             conn.unmap_window(win)?;
-            println!("Overlay hidden");
         } else {
             conn.map_window(win)?;
-            println!("Overlay shown");
         }
         *visible = !*visible;
         conn.flush()?;
         return Ok(true);
     }
 
-    // Check for Ctrl+Alt+E (alternative toggle)
-    if shortcut_tracker.check_ctrl_alt_e(keycode_e) {
-        println!("[OK] Ctrl+Alt+E detected! Toggling overlay...");
-
-        // Reset states immediately after detection
-        shortcut_tracker.reset_modifier_states();
-
-        if *visible {
-            conn.unmap_window(win)?;
-            println!("Overlay hidden");
-        } else {
-            conn.map_window(win)?;
-            println!("Overlay shown");
-        }
-        *visible = !*visible;
-        conn.flush()?;
-        return Ok(true);
-    }
-
-    // Check for Ctrl+Shift+Q (screenshot) or Ctrl+Q (short screenshot)
-    if shortcut_tracker.check_ctrl_shift_q(keycode_q) || shortcut_tracker.check_ctrl_q(keycode_q) {
+    // Check for Ctrl+Shift+Q (screenshot)
+    if shortcut_tracker.check_ctrl_shift_q(keycode_q) {
         // Block if screenshot is already being processed
         if *screenshot_processing {
             println!("[BLOCKED] Screenshot already in progress, please wait...");
             return Ok(true);
         }
-
-        let shortcut_name = if shortcut_tracker.check_ctrl_shift_q(keycode_q) {
-            "Ctrl+Shift+Q"
-        } else {
-            "Ctrl+Q"
-        };
-
-        println!(
-            "[OK] {} detected! Taking screenshot and analyzing...",
-            shortcut_name
-        );
 
         // Set processing flag
         *screenshot_processing = true;
@@ -516,98 +366,39 @@ fn handle_key_event(
         // Reset states immediately after detection
         shortcut_tracker.reset_modifier_states();
 
-        // Debug: Show what we're about to do
-        #[cfg(debug_assertions)]
-        println!("Debug: Starting screenshot process...");
-
-        // Temporarily hide overlay if visible
         if *visible {
             conn.unmap_window(win)?;
             conn.flush()?;
-            println!("Hiding overlay for clean screenshot...");
             std::thread::sleep(Duration::from_millis(100));
-
-            #[cfg(debug_assertions)]
-            println!("Debug: Overlay hidden, starting capture...");
         }
-
-        println!("[CAPTURE] Capturing screenshot...");
-
-        // Debug: Show screenshot attempt
-        #[cfg(debug_assertions)]
-        println!(
-            "Debug: Calling capture_screenshot with {}x{}",
-            screen_width, screen_height
-        );
 
         // Capture screenshot
         match capture_screenshot(conn, root, screen_width, screen_height) {
-            Ok(png_data) => {
-                println!("[OK] Screenshot captured ({} bytes)", png_data.len());
-                println!("[AI] Sending to Gemini AI for analysis...");
+            Ok(png_data) => match gemini::get_api_key(config.gemini_api_key.clone()) {
+                Ok(api_key) => match gemini::analyze_screenshot_data(&png_data, &api_key) {
+                    Ok(analysis) => {
+                        let current_offset = renderer.scroll_offset();
+                        *renderer = Renderer::new(config.clone())
+                            .with_font(font_id, font_ascent, font_descent)
+                            .with_text(format!("[AI] Screenshot Analysis:\n\n{}", analysis))
+                            .with_scroll_offset(current_offset);
 
-                #[cfg(debug_assertions)]
-                println!("Debug: Screenshot successful, checking API key...");
-
-                match gemini::get_api_key(config.gemini_api_key.clone()) {
-                    Ok(api_key) => {
-                        #[cfg(debug_assertions)]
-                        println!("Debug: API key found, sending to Gemini...");
-
-                        match gemini::analyze_screenshot_data(&png_data, &api_key) {
-                            Ok(analysis) => {
-                                println!(
-                                    "[OK] AI analysis complete! Use Ctrl+Shift+E to view results."
-                                );
-
-                                let current_offset = renderer.scroll_offset();
-                                *renderer = Renderer::new(config.clone())
-                                    .with_font(font_id, font_ascent, font_descent)
-                                    .with_text(format!("[AI] Screenshot Analysis:\n\n{}", analysis))
-                                    .with_scroll_offset(current_offset);
-
-                                conn.clear_area(false, win, 0, 0, 0, 0)?;
-                                conn.flush()?;
-
-                                // DO NOT automatically show overlay - user must toggle with Ctrl+Shift+E
-                                println!(
-                                    "[OK] Analysis ready! Press Ctrl+Shift+E to view results."
-                                );
-
-                                #[cfg(debug_assertions)]
-                                println!(
-                                    "Debug: Screenshot analysis stored, waiting for user to toggle overlay"
-                                );
-
-                                // Clear processing flag
-                                *screenshot_processing = false;
-                            }
-                            Err(e) => {
-                                println!("{}", e); // Error message is already formatted nicely
-                                #[cfg(debug_assertions)]
-                                println!("Debug: Gemini analysis failed: {}", e);
-
-                                // Clear processing flag on error
-                                *screenshot_processing = false;
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        println!("{}", e); // Error message is already formatted nicely
-                        #[cfg(debug_assertions)]
-                        println!("Debug: API key error: {}", e);
-
-                        // Clear processing flag on error
+                        conn.clear_area(false, win, 0, 0, 0, 0)?;
+                        conn.flush()?;
                         *screenshot_processing = false;
                     }
+                    Err(e) => {
+                        println!("{}", e);
+                        *screenshot_processing = false;
+                    }
+                },
+                Err(e) => {
+                    println!("{}", e);
+                    *screenshot_processing = false;
                 }
-            }
+            },
             Err(e) => {
                 println!("[ERROR] Screenshot capture failed: {}", e);
-                #[cfg(debug_assertions)]
-                println!("Debug: Screenshot capture error: {}", e);
-
-                // Clear processing flag on error
                 *screenshot_processing = false;
             }
         }
@@ -616,72 +407,8 @@ fn handle_key_event(
         if *visible {
             conn.map_window(win)?;
             conn.flush()?;
-            #[cfg(debug_assertions)]
-            println!("Debug: Overlay restored");
         }
         return Ok(true);
-    }
-
-    // Debug: Show when Q key is pressed but combination doesn't match
-    if keycode == keycode_q {
-        #[cfg(debug_assertions)]
-        println!("Debug: Q key pressed but screenshot shortcuts not detected");
-
-        // Check individual modifiers
-        let has_ctrl = shortcut_tracker
-            .ctrl_keycode()
-            .map_or(false, |k| pressed_keys.contains(&k));
-        let has_shift = shortcut_tracker
-            .shift_keycode()
-            .map_or(false, |k| pressed_keys.contains(&k))
-            || pressed_keys.contains(&50)
-            || pressed_keys.contains(&62);
-
-        println!(
-            "Q key detected! Ctrl={}, Shift={} (Need: Ctrl+Shift+Q OR Ctrl+Q)",
-            has_ctrl, has_shift
-        );
-
-        if !has_ctrl {
-            println!("Warning: Missing Ctrl! Hold Ctrl+Shift, then press S");
-        } else if !has_shift {
-            println!("Warning: Missing Shift! Hold Ctrl+Shift, then press S");
-        }
-
-        // FALLBACK: Simple combination check for testing
-        if has_ctrl && has_shift {
-            println!("Fallback: Attempting screenshot with simple detection...");
-
-            // Simple screenshot attempt
-            match capture_screenshot(conn, root, screen_width, screen_height) {
-                Ok(png_data) => {
-                    println!(
-                        "[OK] Fallback screenshot captured ({} bytes)",
-                        png_data.len()
-                    );
-
-                    // Simple text display without Gemini for testing
-                    let current_offset = renderer.scroll_offset();
-                    *renderer = Renderer::new(config.clone())
-                        .with_font(font_id, font_ascent, font_descent)
-                        .with_text(format!("[TEST] Screenshot Test Successful!\n\nCaptured {} bytes at {}x{}\n\nPress Ctrl+Shift+E to toggle overlay", png_data.len(), screen_width, screen_height))
-                        .with_scroll_offset(current_offset);
-
-                    conn.clear_area(false, win, 0, 0, 0, 0)?;
-                    conn.flush()?;
-
-                    if !*visible {
-                        conn.map_window(win)?;
-                        *visible = true;
-                        println!("[OK] Overlay shown with screenshot test result");
-                    }
-                }
-                Err(e) => {
-                    println!("[ERROR] Fallback screenshot failed: {}", e);
-                }
-            }
-            return Ok(true);
-        }
     }
 
     // Handle arrow keys (only when visible)
@@ -691,32 +418,24 @@ fn handle_key_event(
             conn.clear_area(false, win, 0, 0, config.width, config.height)?;
             renderer.render(conn, win)?;
             conn.flush()?;
-            #[cfg(debug_assertions)]
-            println!("Debug: Scrolled up");
             return Ok(true);
         } else if keycode == keycode_down {
             renderer.scroll_down();
             conn.clear_area(false, win, 0, 0, config.width, config.height)?;
             renderer.render(conn, win)?;
             conn.flush()?;
-            #[cfg(debug_assertions)]
-            println!("Debug: Scrolled down");
             return Ok(true);
         } else if keycode == keycode_left {
             renderer.scroll_left();
             conn.clear_area(false, win, 0, 0, config.width, config.height)?;
             renderer.render(conn, win)?;
             conn.flush()?;
-            #[cfg(debug_assertions)]
-            println!("Debug: Scrolled left");
             return Ok(true);
         } else if keycode == keycode_right {
             renderer.scroll_right();
             conn.clear_area(false, win, 0, 0, config.width, config.height)?;
             renderer.render(conn, win)?;
             conn.flush()?;
-            #[cfg(debug_assertions)]
-            println!("Debug: Scrolled right");
             return Ok(true);
         }
     }
