@@ -66,7 +66,7 @@ impl ShortcutTracker {
             keycode_e: None,
             keycode_q: None,
             modifier_timeout: Duration::from_millis(500), // Responsive timeout
-            debounce_timeout: Duration::from_millis(200), // Prevent rapid triggers
+            debounce_timeout: Duration::from_millis(50),  // Fast debounce for rapid key spam
         }
     }
 
@@ -143,9 +143,9 @@ impl ShortcutTracker {
                 // Check if modifier combination has stabilized
                 if ctrl_pressed == *ctrl && shift_pressed == *shift && alt_pressed == *alt {
                     // Same combination for stability check - transition to awaiting target
-                    if now.duration_since(*timestamp) > Duration::from_millis(30) {
+                    if now.duration_since(*timestamp) > Duration::from_millis(10) {
                         #[cfg(debug_assertions)]
-                        println!("State: ModifiersPressed → AwaitingTargetKey (stable for 30ms)");
+                        println!("State: ModifiersPressed → AwaitingTargetKey (stable for 10ms)");
 
                         self.state = ShortcutState::AwaitingTargetKey {
                             ctrl: ctrl_pressed,
@@ -253,10 +253,25 @@ impl ShortcutTracker {
         );
 
         if detected {
-            // Reset state after detection to prevent repeated triggers
-            self.state = ShortcutState::Idle;
-            #[cfg(debug_assertions)]
-            println!("[OK] Ctrl+Shift+E consumed, resetting to Idle");
+            // Immediately reset to AwaitingTargetKey instead of Idle for rapid re-triggering
+            // This allows holding modifiers and spamming the target key
+            if self.is_ctrl_pressed() && self.is_shift_pressed() && !self.is_alt_pressed() {
+                self.state = ShortcutState::AwaitingTargetKey {
+                    ctrl: true,
+                    shift: true,
+                    alt: false,
+                    timestamp: Instant::now(),
+                };
+
+                #[cfg(debug_assertions)]
+                println!("[OK] Ctrl+Shift+E consumed, staying in AwaitingTargetKey for rapid spam");
+            } else {
+                // Modifiers not held, reset to Idle
+                self.state = ShortcutState::Idle;
+
+                #[cfg(debug_assertions)]
+                println!("[OK] Ctrl+Shift+E consumed, resetting to Idle");
+            }
         }
 
         detected
@@ -272,9 +287,23 @@ impl ShortcutTracker {
         );
 
         if detected {
-            self.state = ShortcutState::Idle;
-            #[cfg(debug_assertions)]
-            println!("[OK] Ctrl+Shift+Q consumed, resetting to Idle");
+            // Immediately reset to AwaitingTargetKey for rapid re-triggering
+            if self.is_ctrl_pressed() && self.is_shift_pressed() && !self.is_alt_pressed() {
+                self.state = ShortcutState::AwaitingTargetKey {
+                    ctrl: true,
+                    shift: true,
+                    alt: false,
+                    timestamp: Instant::now(),
+                };
+
+                #[cfg(debug_assertions)]
+                println!("[OK] Ctrl+Shift+Q consumed, staying in AwaitingTargetKey for rapid spam");
+            } else {
+                self.state = ShortcutState::Idle;
+
+                #[cfg(debug_assertions)]
+                println!("[OK] Ctrl+Shift+Q consumed, resetting to Idle");
+            }
         }
 
         detected
@@ -290,9 +319,23 @@ impl ShortcutTracker {
         );
 
         if detected {
-            self.state = ShortcutState::Idle;
-            #[cfg(debug_assertions)]
-            println!("[OK] Ctrl+Q consumed, resetting to Idle");
+            // Immediately reset to AwaitingTargetKey for rapid re-triggering
+            if self.is_ctrl_pressed() && !self.is_shift_pressed() && !self.is_alt_pressed() {
+                self.state = ShortcutState::AwaitingTargetKey {
+                    ctrl: true,
+                    shift: false,
+                    alt: false,
+                    timestamp: Instant::now(),
+                };
+
+                #[cfg(debug_assertions)]
+                println!("[OK] Ctrl+Q consumed, staying in AwaitingTargetKey for rapid spam");
+            } else {
+                self.state = ShortcutState::Idle;
+
+                #[cfg(debug_assertions)]
+                println!("[OK] Ctrl+Q consumed, resetting to Idle");
+            }
         }
 
         detected
@@ -308,9 +351,23 @@ impl ShortcutTracker {
         );
 
         if detected {
-            self.state = ShortcutState::Idle;
-            #[cfg(debug_assertions)]
-            println!("[OK] Ctrl+Alt+E consumed, resetting to Idle");
+            // Immediately reset to AwaitingTargetKey for rapid re-triggering
+            if self.is_ctrl_pressed() && !self.is_shift_pressed() && self.is_alt_pressed() {
+                self.state = ShortcutState::AwaitingTargetKey {
+                    ctrl: true,
+                    shift: false,
+                    alt: true,
+                    timestamp: Instant::now(),
+                };
+
+                #[cfg(debug_assertions)]
+                println!("[OK] Ctrl+Alt+E consumed, staying in AwaitingTargetKey for rapid spam");
+            } else {
+                self.state = ShortcutState::Idle;
+
+                #[cfg(debug_assertions)]
+                println!("[OK] Ctrl+Alt+E consumed, resetting to Idle");
+            }
         }
 
         detected
