@@ -1,6 +1,9 @@
 mod config;
+mod evdev_monitor;
 mod gemini;
+mod modifier_mapper;
 mod renderer;
+mod xinput2_monitor;
 
 use std::error::Error;
 use std::time::Duration;
@@ -11,7 +14,10 @@ use x11rb::protocol::Event;
 use x11rb::rust_connection::RustConnection;
 
 use config::OverlayConfig;
+use evdev_monitor::EvdevMonitor;
+use modifier_mapper::ModifierMapper;
 use renderer::Renderer;
+use xinput2_monitor::KeyStateTracker;
 
 // X11 keysyms
 const XK_E: u32 = 0x0065; // 'E' key
@@ -169,82 +175,36 @@ fn main() -> Result<(), Box<dyn Error>> {
         &[], // empty region = fully click-through
     )?;
 
-    // Grab Ctrl+Alt+E/S for overlay toggle and screenshot
-    let keycode_e = get_keycode(&conn, XK_E)?;
-    let keycode_s = get_keycode(&conn, XK_S)?;
-    let keycode_up = get_keycode(&conn, XK_UP)?;
-    let keycode_down = get_keycode(&conn, XK_DOWN)?;
-    let keycode_left = get_keycode(&conn, XK_LEFT)?;
-    let keycode_right = get_keycode(&conn, XK_RIGHT)?;
-    let modifiers = ModMask::CONTROL | ModMask::M1; // M1 = Alt
+    // Initialize modifier mapper for dynamic modifier detection
+    let mut modifier_mapper = ModifierMapper::new(&conn)?;
 
-    // Grab the key combinations globally
-    conn.grab_key(
-        false,           // owner_events
-        root,            // grab_window
-        modifiers,       // modifiers
-        keycode_e,       // key
-        GrabMode::ASYNC, // pointer_mode
-        GrabMode::ASYNC, // keyboard_mode
-    )?;
-
-    // Grab Ctrl+Alt+S for screenshot
-    conn.grab_key(
-        false,
-        root,
-        modifiers,
-        keycode_s,
-        GrabMode::ASYNC,
-        GrabMode::ASYNC,
-    )?;
-
-    // Helper to grab/ungrab arrow keys
-    let grab_arrow_keys = |grab: bool| -> Result<(), Box<dyn Error>> {
-        if grab {
-            conn.grab_key(
-                false,
-                root,
-                ModMask::default(),
-                keycode_up,
-                GrabMode::ASYNC,
-                GrabMode::ASYNC,
-            )?;
-            conn.grab_key(
-                false,
-                root,
-                ModMask::default(),
-                keycode_down,
-                GrabMode::ASYNC,
-                GrabMode::ASYNC,
-            )?;
-            conn.grab_key(
-                false,
-                root,
-                ModMask::default(),
-                keycode_left,
-                GrabMode::ASYNC,
-                GrabMode::ASYNC,
-            )?;
-            conn.grab_key(
-                false,
-                root,
-                ModMask::default(),
-                keycode_right,
-                GrabMode::ASYNC,
-                GrabMode::ASYNC,
-            )?;
-        } else {
-            conn.ungrab_key(keycode_up, root, ModMask::default())?;
-            conn.ungrab_key(keycode_down, root, ModMask::default())?;
-            conn.ungrab_key(keycode_left, root, ModMask::default())?;
-            conn.ungrab_key(keycode_right, root, ModMask::default())?;
+    // Use evdev monitoring for system-level stealth (no grabbing)
+    let evdev_monitor = match EvdevMonitor::new() {
+        Ok(monitor) => {
+            #[cfg(debug_assertions)]
+            println!("Debug: Using evdev monitoring (no grabbing, fully transparent)");
+            Some(monitor)
         }
-        conn.flush()?;
-        Ok(())
+        Err(e) => {
+            #[cfg(debug_assertions)]
+            eprintln!("Debug: Evdev monitoring unavailable: {}. This overlay requires evdev access.", e);
+            eprintln!("Please ensure you have permission to access /dev/input/event* devices.");
+            eprintln!("You may need to add your user to the 'input' group:");
+            eprintln!("  sudo usermod -a -G input $USER");
+            return Err("Evdev monitoring required but unavailable".into());
+        }
     };
 
-    // Initially grab arrow keys since overlay starts visible
-    grab_arrow_keys(true)?;
+    // Get keycodes for our hotkeys
+    let keycode_e = modifier_mapper.get_keycode(XK_E).ok_or("E key not found")?;
+    let keycode_s = modifier_mapper.get_keycode(XK_S).ok_or("S key not found")?;
+    let keycode_up = modifier_mapper.get_keycode(XK_UP).ok_or("Up key not found")?;
+    let keycode_down = modifier_mapper.get_keycode(XK_DOWN).ok_or("Down key not found")?;
+    let keycode_left = modifier_mapper.get_keycode(XK_LEFT).ok_or("Left key not found")?;
+    let keycode_right = modifier_mapper.get_keycode(XK_RIGHT).ok_or("Right key not found")?;
+
+    // Track key states for combination detection
+    let mut key_tracker = KeyStateTracker::new();
 
     // Initial state: visible
     let mut visible = true;
@@ -254,146 +214,226 @@ fn main() -> Result<(), Box<dyn Error>> {
     #[cfg(debug_assertions)]
     println!("Debug: Overlay started. Press Ctrl+Alt+E to toggle, Ctrl+Alt+S to screenshot.");
 
-    // Event loop (silent in release, verbose in debug)
+    // Event loop - handle both XInput2 raw events and evdev events
     loop {
+        // Handle evdev events if available
+        if let Some(ref evdev) = evdev_monitor {
+            while let Some(ev) = evdev.try_recv() {
+                let x11_keycode = evdev_monitor::evdev_to_x11_keycode(ev.keycode);
+                if ev.pressed {
+                    key_tracker.key_pressed(x11_keycode);
+                } else {
+                    key_tracker.key_released(x11_keycode);
+                }
+
+                // Check for hotkey combinations
+                handle_key_event(
+                    x11_keycode,
+                    ev.pressed,
+                    &key_tracker,
+                    &modifier_mapper,
+                    keycode_e,
+                    keycode_s,
+                    keycode_up,
+                    keycode_down,
+                    keycode_left,
+                    keycode_right,
+                    &mut visible,
+                    &conn,
+                    win,
+                    &config,
+                    &mut renderer,
+                    font_id,
+                    font_ascent,
+                    font_descent,
+                    root,
+                    screen_width,
+                    screen_height,
+                )?;
+            }
+        }
+
+        // Handle X11 events
         match conn.poll_for_event()? {
             Some(Event::Expose(_)) if visible => {
                 // Use renderer to draw the overlay
                 renderer.render(&conn, win)?;
             }
-            Some(Event::KeyPress(k)) if k.detail == keycode_up && visible => {
-                // Scroll up
-                renderer.scroll_up();
-                conn.clear_area(false, win, 0, 0, config.width, config.height)?;
-                renderer.render(&conn, win)?;
-                conn.flush()?;
+            Some(Event::MappingNotify(_)) => {
+                // Keyboard layout changed, refresh modifier mapping
                 #[cfg(debug_assertions)]
-                println!("Debug: Scrolled up");
-            }
-            Some(Event::KeyPress(k)) if k.detail == keycode_down && visible => {
-                // Scroll down
-                renderer.scroll_down();
-                conn.clear_area(false, win, 0, 0, config.width, config.height)?;
-                renderer.render(&conn, win)?;
-                conn.flush()?;
-                #[cfg(debug_assertions)]
-                println!("Debug: Scrolled down");
-            }
-            Some(Event::KeyPress(k)) if k.detail == keycode_left && visible => {
-                // Scroll left
-                renderer.scroll_left();
-                conn.clear_area(false, win, 0, 0, config.width, config.height)?;
-                renderer.render(&conn, win)?;
-                conn.flush()?;
-                #[cfg(debug_assertions)]
-                println!("Debug: Scrolled left");
-            }
-            Some(Event::KeyPress(k)) if k.detail == keycode_right && visible => {
-                // Scroll right
-                renderer.scroll_right();
-                conn.clear_area(false, win, 0, 0, config.width, config.height)?;
-                renderer.render(&conn, win)?;
-                conn.flush()?;
-                #[cfg(debug_assertions)]
-                println!("Debug: Scrolled right");
-            }
-            Some(Event::KeyPress(k)) if k.detail == keycode_e => {
-                // Check if the modifiers match (Ctrl+Alt)
-                if k.state.contains(ModMask::CONTROL) && k.state.contains(ModMask::M1) {
-                    // Toggle visibility
-                    if visible {
-                        conn.unmap_window(win)?;
-                        grab_arrow_keys(false)?; // Ungrab arrows when hidden
-                        #[cfg(debug_assertions)]
-                        println!("Debug: Overlay hidden");
-                    } else {
-                        conn.map_window(win)?;
-                        grab_arrow_keys(true)?; // Grab arrows when shown
-                        #[cfg(debug_assertions)]
-                        println!("Debug: Overlay shown");
-                    }
-                    visible = !visible;
-                    conn.flush()?;
-                }
-            }
-            Some(Event::KeyPress(k)) if k.detail == keycode_s => {
-                // Check if the modifiers match (Ctrl+Alt)
-                if k.state.contains(ModMask::CONTROL) && k.state.contains(ModMask::M1) {
-                    #[cfg(debug_assertions)]
-                    println!("Debug: Taking screenshot...");
-
-                    // Temporarily hide overlay if visible
-                    if visible {
-                        conn.unmap_window(win)?;
-                        conn.flush()?;
-                        std::thread::sleep(Duration::from_millis(50)); // Allow X to update
-                    }
-
-                    // Capture screenshot in memory (don't save to disk)
-                    match capture_screenshot(&conn, root, screen_width, screen_height) {
-                        Ok(png_data) => {
-                            #[cfg(debug_assertions)]
-                            println!("Debug: Screenshot captured ({} bytes)", png_data.len());
-
-                            // Analyze screenshot with Gemini API
-                            #[cfg(debug_assertions)]
-                            println!("Debug: Analyzing screenshot with Gemini...");
-
-                            match gemini::get_api_key(config.gemini_api_key.clone()) {
-                                Ok(api_key) => {
-                                    match gemini::analyze_screenshot_data(&png_data, &api_key) {
-                                        Ok(analysis) => {
-                                            #[cfg(debug_assertions)]
-                                            println!("Debug: Gemini analysis received");
-
-                                            // Update renderer with new text (preserve scroll offset)
-                                            let current_offset = renderer.scroll_offset();
-                                            renderer = Renderer::new(config.clone())
-                                                .with_font(font_id, font_ascent, font_descent)
-                                                .with_text(format!(
-                                                    "Screenshot Analysis:\n\n{}",
-                                                    analysis
-                                                ))
-                                                .with_scroll_offset(current_offset);
-
-                                            // Trigger redraw by sending expose event
-                                            conn.clear_area(false, win, 0, 0, 0, 0)?;
-                                            conn.flush()?;
-                                        }
-                                        Err(e) => {
-                                            #[cfg(debug_assertions)]
-                                            eprintln!("Debug: Gemini analysis failed: {}", e);
-                                        }
-                                    }
-                                }
-                                Err(e) => {
-                                    #[cfg(debug_assertions)]
-                                    eprintln!("Debug: {}", e);
-                                }
-                            }
-                        }
-                        Err(e) => {
-                            #[cfg(debug_assertions)]
-                            eprintln!("Debug: Screenshot capture failed: {}", e);
-                        }
-                    }
-
-                    // Restore overlay if it was visible
-                    if visible {
-                        conn.map_window(win)?;
-                        conn.flush()?;
-                    }
-                }
+                println!("Debug: Keyboard mapping changed, refreshing...");
+                modifier_mapper.refresh(&conn)?;
             }
             _ => {
                 // Small sleep to avoid busy waiting
-                std::thread::sleep(Duration::from_millis(50));
+                std::thread::sleep(Duration::from_millis(10));
             }
         }
     }
 }
 
-/// Convert a keysym to a keycode
+/// Handle key events (both XInput2 and evdev)
+#[allow(clippy::too_many_arguments)]
+fn handle_key_event(
+    keycode: Keycode,
+    pressed: bool,
+    key_tracker: &KeyStateTracker,
+    modifier_mapper: &ModifierMapper,
+    keycode_e: Keycode,
+    keycode_s: Keycode,
+    keycode_up: Keycode,
+    keycode_down: Keycode,
+    keycode_left: Keycode,
+    keycode_right: Keycode,
+    visible: &mut bool,
+    conn: &RustConnection,
+    win: Window,
+    config: &OverlayConfig,
+    renderer: &mut Renderer,
+    font_id: u32,
+    font_ascent: u16,
+    font_descent: u16,
+    root: Window,
+    screen_width: u16,
+    screen_height: u16,
+) -> Result<(), Box<dyn Error>> {
+    if !pressed {
+        return Ok(());
+    }
+
+    // Check if Ctrl and Alt are pressed
+    let pressed_keys = key_tracker.get_pressed_keys();
+
+    // Find Ctrl and Alt keycodes
+    let ctrl_left = modifier_mapper.get_keycode(0xffe3); // Control_L
+    let ctrl_right = modifier_mapper.get_keycode(0xffe4); // Control_R
+    let ctrl_pressed = ctrl_left.map_or(false, |k| pressed_keys.contains(&k))
+        || ctrl_right.map_or(false, |k| pressed_keys.contains(&k));
+
+    // Check for Alt keys (multiple possible mappings)
+    let alt_left = modifier_mapper.get_keycode(0xffe9); // Alt_L
+    let alt_right = modifier_mapper.get_keycode(0xffea); // Alt_R
+    let meta_left = modifier_mapper.get_keycode(0xffe7); // Meta_L
+    let meta_right = modifier_mapper.get_keycode(0xffe8); // Meta_R
+
+    let alt_pressed = alt_left.map_or(false, |k| pressed_keys.contains(&k))
+        || alt_right.map_or(false, |k| pressed_keys.contains(&k))
+        || meta_left.map_or(false, |k| pressed_keys.contains(&k))
+        || meta_right.map_or(false, |k| pressed_keys.contains(&k));
+
+    // Handle Ctrl+Alt+E (toggle overlay)
+    if keycode == keycode_e && ctrl_pressed && alt_pressed {
+        if *visible {
+            conn.unmap_window(win)?;
+            #[cfg(debug_assertions)]
+            println!("Debug: Overlay hidden");
+        } else {
+            conn.map_window(win)?;
+            #[cfg(debug_assertions)]
+            println!("Debug: Overlay shown");
+        }
+        *visible = !*visible;
+        conn.flush()?;
+        return Ok(());
+    }
+
+    // Handle Ctrl+Alt+S (screenshot)
+    if keycode == keycode_s && ctrl_pressed && alt_pressed {
+        #[cfg(debug_assertions)]
+        println!("Debug: Taking screenshot...");
+
+        // Temporarily hide overlay if visible
+        if *visible {
+            conn.unmap_window(win)?;
+            conn.flush()?;
+            std::thread::sleep(Duration::from_millis(50));
+        }
+
+        // Capture screenshot
+        match capture_screenshot(conn, root, screen_width, screen_height) {
+            Ok(png_data) => {
+                #[cfg(debug_assertions)]
+                println!("Debug: Screenshot captured ({} bytes)", png_data.len());
+
+                match gemini::get_api_key(config.gemini_api_key.clone()) {
+                    Ok(api_key) => match gemini::analyze_screenshot_data(&png_data, &api_key) {
+                        Ok(analysis) => {
+                            #[cfg(debug_assertions)]
+                            println!("Debug: Gemini analysis received");
+
+                            let current_offset = renderer.scroll_offset();
+                            *renderer = Renderer::new(config.clone())
+                                .with_font(font_id, font_ascent, font_descent)
+                                .with_text(format!("Screenshot Analysis:\n\n{}", analysis))
+                                .with_scroll_offset(current_offset);
+
+                            conn.clear_area(false, win, 0, 0, 0, 0)?;
+                            conn.flush()?;
+                        }
+                        Err(e) => {
+                            #[cfg(debug_assertions)]
+                            eprintln!("Debug: Gemini analysis failed: {}", e);
+                        }
+                    },
+                    Err(e) => {
+                        #[cfg(debug_assertions)]
+                        eprintln!("Debug: {}", e);
+                    }
+                }
+            }
+            Err(e) => {
+                #[cfg(debug_assertions)]
+                eprintln!("Debug: Screenshot capture failed: {}", e);
+            }
+        }
+
+        // Restore overlay
+        if *visible {
+            conn.map_window(win)?;
+            conn.flush()?;
+        }
+        return Ok(());
+    }
+
+    // Handle arrow keys (only when visible)
+    if *visible {
+        if keycode == keycode_up {
+            renderer.scroll_up();
+            conn.clear_area(false, win, 0, 0, config.width, config.height)?;
+            renderer.render(conn, win)?;
+            conn.flush()?;
+            #[cfg(debug_assertions)]
+            println!("Debug: Scrolled up");
+        } else if keycode == keycode_down {
+            renderer.scroll_down();
+            conn.clear_area(false, win, 0, 0, config.width, config.height)?;
+            renderer.render(conn, win)?;
+            conn.flush()?;
+            #[cfg(debug_assertions)]
+            println!("Debug: Scrolled down");
+        } else if keycode == keycode_left {
+            renderer.scroll_left();
+            conn.clear_area(false, win, 0, 0, config.width, config.height)?;
+            renderer.render(conn, win)?;
+            conn.flush()?;
+            #[cfg(debug_assertions)]
+            println!("Debug: Scrolled left");
+        } else if keycode == keycode_right {
+            renderer.scroll_right();
+            conn.clear_area(false, win, 0, 0, config.width, config.height)?;
+            renderer.render(conn, win)?;
+            conn.flush()?;
+            #[cfg(debug_assertions)]
+            println!("Debug: Scrolled right");
+        }
+    }
+
+    Ok(())
+}
+
+/// Convert a keysym to a keycode (keep for compatibility)
+#[allow(dead_code)]
 fn get_keycode(conn: &RustConnection, keysym: u32) -> Result<Keycode, Box<dyn Error>> {
     let setup = conn.setup();
     let min_keycode = setup.min_keycode;
