@@ -1,5 +1,8 @@
 use serde::{Deserialize, Serialize};
 use std::error::Error;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
 
 const GEMINI_API_URL: &str =
     "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent";
@@ -48,7 +51,16 @@ struct ResponsePart {
 }
 
 /// Analyze a screenshot using Gemini API (from PNG data in memory)
-pub fn analyze_screenshot_data(png_data: &[u8], api_key: &str) -> Result<String, Box<dyn Error>> {
+pub fn analyze_screenshot_data(
+    png_data: &[u8],
+    api_key: &str,
+    cancel_flag: Arc<AtomicBool>,
+) -> Result<String, Box<dyn Error>> {
+    // Check if cancelled before starting
+    if cancel_flag.load(Ordering::SeqCst) {
+        return Err("[CANCELLED] Request interrupted by user".into());
+    }
+
     // Base64 encode the PNG data
     let base64_image = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, png_data);
 
@@ -75,11 +87,23 @@ Never add explanations or extra text. Only give the answer."#;
         }],
     };
 
-    // Make the API request
-    let client = reqwest::blocking::Client::new();
+    // Make the API request with timeout
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(30))
+        .build()?;
     let url = format!("{}?key={}", GEMINI_API_URL, api_key);
 
+    // Check cancellation before sending
+    if cancel_flag.load(Ordering::SeqCst) {
+        return Err("[CANCELLED] Request interrupted before sending".into());
+    }
+
     let response = client.post(&url).json(&request).send()?;
+
+    // Check cancellation after receiving response
+    if cancel_flag.load(Ordering::SeqCst) {
+        return Err("[CANCELLED] Request interrupted after response".into());
+    }
 
     if !response.status().is_success() {
         let status = response.status();

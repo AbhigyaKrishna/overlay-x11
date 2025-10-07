@@ -6,6 +6,8 @@ mod renderer;
 mod shortcut_tracker;
 
 use std::error::Error;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 use x11rb::connection::Connection;
 use x11rb::protocol::Event;
@@ -19,6 +21,9 @@ use modifier_mapper::ModifierMapper;
 use renderer::Renderer;
 use shortcut_tracker::ShortcutTracker;
 
+// Add channel support for background processing
+use crossbeam_channel::{Receiver, Sender, unbounded};
+
 // X11 keysyms
 const XK_E: u32 = 0x0065; // 'E' key
 const XK_Q: u32 = 0x0071; // 'Q' key
@@ -26,6 +31,13 @@ const XK_UP: u32 = 0xff52; // Up arrow
 const XK_DOWN: u32 = 0xff54; // Down arrow
 const XK_LEFT: u32 = 0xff51; // Left arrow
 const XK_RIGHT: u32 = 0xff53; // Right arrow
+
+// Structure to hold AI response data
+#[derive(Debug, Clone)]
+pub struct AiResponse {
+    pub content: String,
+    pub timestamp: std::time::Instant,
+}
 
 fn main() -> Result<(), Box<dyn Error>> {
     // Parse command-line arguments
@@ -153,17 +165,19 @@ fn main() -> Result<(), Box<dyn Error>> {
     println!("Debug: ModifierMapper initialized");
 
     // Use evdev monitoring for system-level stealth (no grabbing)
-    let mut evdev_monitor = match EvdevMonitor::new() {
+    let evdev_monitor = match EvdevMonitor::new() {
         Ok(monitor) => Some(monitor),
         Err(e) => {
             #[cfg(debug_assertions)]
-            eprintln!(
-                "Debug: Evdev monitoring unavailable: {}. This overlay requires evdev access.",
-                e
-            );
-            eprintln!("Please ensure you have permission to access /dev/input/event* devices.");
-            eprintln!("You may need to add your user to the 'input' group:");
-            eprintln!("  sudo usermod -a -G input $USER");
+            {
+                eprintln!(
+                    "Debug: Evdev monitoring unavailable: {}. This overlay requires evdev access.",
+                    e
+                );
+                eprintln!("Please ensure you have permission to access /dev/input/event* devices.");
+                eprintln!("You may need to add your user to the 'input' group:");
+                eprintln!("  sudo usermod -a -G input $USER");
+            }
             return Err("Evdev monitoring required but unavailable".into());
         }
     };
@@ -186,37 +200,113 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     // Track key states and shortcuts with unified tracker
     let mut shortcut_tracker = ShortcutTracker::new();
-    shortcut_tracker.update_keycodes(&modifier_mapper); // Add periodic cleanup timer
+    shortcut_tracker.update_keycodes(&modifier_mapper);
+
+    // Add periodic cleanup timer
     let mut last_cleanup = std::time::Instant::now();
+
+    // Create channel for AI responses
+    let (ai_sender, ai_receiver): (Sender<AiResponse>, Receiver<AiResponse>) = unbounded();
 
     // Track screenshot processing state to prevent concurrent requests
     let mut screenshot_processing = false;
+
+    // Track loading state for UI feedback
+    let mut loading_message = String::new();
+    let mut loading_start_time: Option<std::time::Instant> = None;
+    let mut last_loading_update = std::time::Instant::now();
+
+    // Track current processing thread to enable interruption
+    let mut current_cancel_flag: Option<Arc<AtomicBool>> = None;
 
     // Initial state: visible
     let mut visible = true;
     conn.map_window(win)?;
     conn.flush()?;
 
-    println!("=== OVERLAY CONTROLS ===");
-    println!("Toggle Overlay: Hold Ctrl + Shift, then press E");
-    println!("Screenshot + AI: Hold Ctrl + Shift, then press Q");
-    println!("When overlay is visible: Use arrow keys to scroll");
-    println!("========================");
+    #[cfg(debug_assertions)]
+    {
+        println!("=== OVERLAY CONTROLS ===");
+        println!("Toggle Overlay: Hold Ctrl + Shift, then press E");
+        println!("Screenshot + AI: Hold Ctrl + Shift, then press Q");
+        println!("When overlay is visible: Use arrow keys to scroll");
+        println!("========================");
+    }
 
     // Event loop - handle both XInput2 raw events and evdev events
     loop {
-        // Periodic cleanup to prevent stuck modifier states (every 10 seconds)
+        // Periodic cleanup to prevent stuck modifier states (every 5 seconds)
         if last_cleanup.elapsed() > Duration::from_secs(5) {
             shortcut_tracker.cleanup_stale_keys();
             shortcut_tracker.reset_modifier_states();
             last_cleanup = std::time::Instant::now();
         }
 
+        // Check for AI responses (non-blocking)
+        if let Ok(response) = ai_receiver.try_recv() {
+            // Only process if this response isn't from an interrupted request
+            let should_process = current_cancel_flag
+                .as_ref()
+                .map_or(true, |flag| !flag.load(Ordering::SeqCst));
+
+            if should_process {
+                let current_offset = renderer.scroll_offset();
+                renderer = Renderer::new(config.clone())
+                    .with_font(font_id, font_ascent, font_descent)
+                    .with_text(format!("[AI] Screenshot Analysis:\n\n{}", response.content))
+                    .with_scroll_offset(current_offset);
+
+                // Clear loading state
+                loading_message.clear();
+                loading_start_time = None;
+                screenshot_processing = false;
+                current_cancel_flag = None;
+
+                // Refresh display if visible
+                if visible {
+                    conn.clear_area(false, win, 0, 0, config.width, config.height)?;
+                    renderer.render(&conn, win)?;
+                    conn.flush()?;
+                }
+            } else {
+                // Response from interrupted request - discard it
+                #[cfg(debug_assertions)]
+                println!("[DISCARDED] Response from interrupted AI request");
+                current_cancel_flag = None;
+            }
+        }
+
+        // Update loading animation if processing (every 500ms)
+        if screenshot_processing && last_loading_update.elapsed() > Duration::from_millis(500) {
+            if let Some(start_time) = loading_start_time {
+                let elapsed = start_time.elapsed().as_secs();
+                let dots = ".".repeat(((elapsed % 4) + 1) as usize);
+                loading_message = format!(
+                    "[AI] Processing screenshot{}\\n\\nThis may take a few moments...",
+                    dots
+                );
+
+                // Update display with loading message
+                let current_offset = renderer.scroll_offset();
+                let temp_renderer = Renderer::new(config.clone())
+                    .with_font(font_id, font_ascent, font_descent)
+                    .with_text(loading_message.clone())
+                    .with_scroll_offset(current_offset);
+
+                if visible {
+                    conn.clear_area(false, win, 0, 0, config.width, config.height)?;
+                    temp_renderer.render(&conn, win)?;
+                    conn.flush()?;
+                }
+
+                last_loading_update = std::time::Instant::now();
+            }
+        }
+
         // Handle evdev events if available
         if let Some(ref evdev) = evdev_monitor {
             while let Some(ev) = evdev.try_recv() {
                 let x11_keycode = evdev_monitor::evdev_to_x11_keycode(ev.keycode);
-
                 if ev.pressed {
                     shortcut_tracker.key_pressed(x11_keycode);
                 } else {
@@ -246,6 +336,10 @@ fn main() -> Result<(), Box<dyn Error>> {
                     screen_width,
                     screen_height,
                     &mut screenshot_processing,
+                    &ai_sender,
+                    &mut loading_message,
+                    &mut loading_start_time,
+                    &mut current_cancel_flag,
                 )? {
                     // Shortcut was handled, continue
                 }
@@ -293,6 +387,10 @@ fn handle_key_event(
     screen_width: u16,
     screen_height: u16,
     screenshot_processing: &mut bool,
+    ai_sender: &Sender<AiResponse>,
+    loading_message: &mut String,
+    loading_start_time: &mut Option<std::time::Instant>,
+    current_cancel_flag: &mut Option<Arc<AtomicBool>>,
 ) -> Result<bool, Box<dyn Error>> {
     // Only process shortcut combinations on key press events
     if !pressed {
@@ -352,62 +450,118 @@ fn handle_key_event(
         return Ok(true);
     }
 
-    // Check for Ctrl+Shift+Q (screenshot)
+    // Check for Ctrl+Shift+Q (screenshot) - IMPROVED VERSION with background processing
     if shortcut_tracker.check_ctrl_shift_q(keycode_q) {
-        // Block if screenshot is already being processed
+        // If already processing, interrupt the previous request
         if *screenshot_processing {
-            println!("[BLOCKED] Screenshot already in progress, please wait...");
-            return Ok(true);
+            if let Some(cancel_flag) = current_cancel_flag.as_ref() {
+                cancel_flag.store(true, Ordering::SeqCst);
+                #[cfg(debug_assertions)]
+                println!("[INTERRUPT] Canceling previous AI request...");
+            }
+            *current_cancel_flag = None;
+            *screenshot_processing = false;
         }
-
-        // Set processing flag
-        *screenshot_processing = true;
 
         // Reset states immediately after detection
         shortcut_tracker.reset_modifier_states();
 
+        // Step 1: Check API key before proceeding
+        if let Err(e) = gemini::get_api_key(config.gemini_api_key.clone()) {
+            // Show API key error on overlay immediately
+            *screenshot_processing = false;
+            let error_message = format!(
+                "[ERROR] API Key Issue\n\n{}\n\nPlease set GEMINI_API_KEY environment variable or add it to overlay.yml",
+                e
+            );
+
+            let current_offset = renderer.scroll_offset();
+            *renderer = Renderer::new(config.clone())
+                .with_font(font_id, font_ascent, font_descent)
+                .with_text(error_message)
+                .with_scroll_offset(current_offset);
+
+            if *visible {
+                conn.clear_area(false, win, 0, 0, config.width, config.height)?;
+                renderer.render(conn, win)?;
+                conn.flush()?;
+            }
+            return Ok(true);
+        }
+
+        // Step 2: Hide overlay immediately
         if *visible {
             conn.unmap_window(win)?;
             conn.flush()?;
-            std::thread::sleep(Duration::from_millis(100));
+            std::thread::sleep(Duration::from_millis(100)); // Brief delay for screen to update
         }
 
-        // Capture screenshot
+        // Step 3: Capture screenshot
         match capture_screenshot(conn, root, screen_width, screen_height) {
-            Ok(png_data) => match gemini::get_api_key(config.gemini_api_key.clone()) {
-                Ok(api_key) => match gemini::analyze_screenshot_data(&png_data, &api_key) {
-                    Ok(analysis) => {
-                        let current_offset = renderer.scroll_offset();
-                        *renderer = Renderer::new(config.clone())
-                            .with_font(font_id, font_ascent, font_descent)
-                            .with_text(format!("[AI] Screenshot Analysis:\n\n{}", analysis))
-                            .with_scroll_offset(current_offset);
+            Ok(png_data) => {
+                // Step 4: Show overlay back immediately with loading message
+                *screenshot_processing = true;
+                *loading_start_time = Some(std::time::Instant::now());
+                *loading_message =
+                    "[AI] Processing screenshot.\n\nThis may take a few moments...".to_string();
 
-                        conn.clear_area(false, win, 0, 0, 0, 0)?;
-                        conn.flush()?;
-                        *screenshot_processing = false;
-                    }
-                    Err(e) => {
-                        println!("{}", e);
-                        *screenshot_processing = false;
-                    }
-                },
-                Err(e) => {
-                    println!("{}", e);
-                    *screenshot_processing = false;
+                // Update renderer with loading message
+                let current_offset = renderer.scroll_offset();
+                *renderer = Renderer::new(config.clone())
+                    .with_font(font_id, font_ascent, font_descent)
+                    .with_text(loading_message.clone())
+                    .with_scroll_offset(current_offset);
+
+                if *visible {
+                    conn.map_window(win)?;
+                    conn.clear_area(false, win, 0, 0, config.width, config.height)?;
+                    renderer.render(conn, win)?;
+                    conn.flush()?;
                 }
-            },
+
+                // Step 5: Create cancellation flag for this request
+                let cancel_flag = Arc::new(AtomicBool::new(false));
+                *current_cancel_flag = Some(cancel_flag.clone());
+
+                // Step 6: Start background AI processing
+                let ai_sender_clone = ai_sender.clone();
+                let config_clone = config.clone();
+                std::thread::spawn(move || {
+                    match process_screenshot_async(png_data, config_clone, cancel_flag) {
+                        Ok(analysis) => {
+                            let response = AiResponse {
+                                content: analysis,
+                                timestamp: std::time::Instant::now(),
+                            };
+                            if let Err(e) = ai_sender_clone.send(response) {
+                                #[cfg(debug_assertions)]
+                                eprintln!("[ERROR] Failed to send AI response: {}", e);
+                            }
+                        }
+                        Err(e) => {
+                            let error_response = AiResponse {
+                                content: format!("Error processing screenshot: {}", e),
+                                timestamp: std::time::Instant::now(),
+                            };
+                            if let Err(send_err) = ai_sender_clone.send(error_response) {
+                                #[cfg(debug_assertions)]
+                                eprintln!("[ERROR] Failed to send error response: {}", send_err);
+                            }
+                        }
+                    }
+                });
+            }
             Err(e) => {
+                #[cfg(debug_assertions)]
                 println!("[ERROR] Screenshot capture failed: {}", e);
-                *screenshot_processing = false;
+                // Restore overlay even if screenshot failed
+                if *visible {
+                    conn.map_window(win)?;
+                    conn.flush()?;
+                }
             }
         }
 
-        // Restore overlay
-        if *visible {
-            conn.map_window(win)?;
-            conn.flush()?;
-        }
         return Ok(true);
     }
 
@@ -479,6 +633,27 @@ fn capture_screenshot(
     }
 
     Ok(png_data)
+}
+
+/// Process screenshot in background thread
+fn process_screenshot_async(
+    png_data: Vec<u8>,
+    config: OverlayConfig,
+    cancel_flag: Arc<AtomicBool>,
+) -> Result<String, Box<dyn Error + Send + Sync>> {
+    // Check if cancelled before starting
+    if cancel_flag.load(Ordering::SeqCst) {
+        return Err("Request cancelled".into());
+    }
+
+    // Get API key (should already be validated, but check again for safety)
+    let api_key = gemini::get_api_key(config.gemini_api_key).map_err(|e| e.to_string())?;
+
+    // Analyze screenshot with cancellation support
+    let analysis = gemini::analyze_screenshot_data(&png_data, &api_key, cancel_flag.clone())
+        .map_err(|e| e.to_string())?;
+
+    Ok(analysis)
 }
 
 /// Setup process-level stealth features
