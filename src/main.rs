@@ -7,7 +7,6 @@ mod xinput2_monitor;
 
 use std::error::Error;
 use std::time::{Duration, Instant};
-use std::collections::HashMap;
 use x11rb::connection::Connection;
 use x11rb::protocol::shape::ConnectionExt as _;
 use x11rb::protocol::xproto::*;
@@ -27,6 +26,113 @@ const XK_UP: u32 = 0xff52; // Up arrow
 const XK_DOWN: u32 = 0xff54; // Down arrow
 const XK_LEFT: u32 = 0xff51; // Left arrow
 const XK_RIGHT: u32 = 0xff53; // Right arrow
+
+/// Robust shortcut combination tracker
+struct ShortcutTracker {
+    ctrl_keycode: Option<u8>,
+    shift_keycode: Option<u8>,
+    alt_keycode: Option<u8>,
+    last_combo_time: Instant,
+    combo_timeout: Duration,
+}
+
+impl ShortcutTracker {
+    fn new() -> Self {
+        Self {
+            ctrl_keycode: None,
+            shift_keycode: None, 
+            alt_keycode: None,
+            last_combo_time: Instant::now(),
+            combo_timeout: Duration::from_millis(500), // 500ms window for combinations
+        }
+    }
+    
+    fn update_keycodes(&mut self, modifier_mapper: &ModifierMapper) {
+        // Get standard modifier keycodes
+        self.ctrl_keycode = modifier_mapper.get_keycode(0xffe3).or_else(|| modifier_mapper.get_keycode(0xffe4));
+        self.shift_keycode = modifier_mapper.get_keycode(0xffe1).or_else(|| modifier_mapper.get_keycode(0xffe2));
+        self.alt_keycode = Some(64); // Use the actual Alt keycode we detected
+        
+        // If Shift keycode is not detected, use common defaults
+        if self.shift_keycode.is_none() {
+            self.shift_keycode = Some(50); // Common Shift_L keycode
+        }
+        
+        #[cfg(debug_assertions)]
+        println!("Debug: ShortcutTracker keycodes - ctrl={:?}, shift={:?}, alt={:?}", 
+                 self.ctrl_keycode, self.shift_keycode, self.alt_keycode);
+    }
+    
+    fn check_combination(&mut self, pressed_keys: &[u8], target_key: u8, need_ctrl: bool, need_shift: bool, need_alt: bool) -> bool {
+        let now = Instant::now();
+        
+        // Check if target key is pressed
+        if !pressed_keys.contains(&target_key) {
+            return false;
+        }
+        
+        let mut has_ctrl = false;
+        let mut has_shift = false;
+        let mut has_alt = false;
+        
+        // Check modifiers
+        if need_ctrl {
+            has_ctrl = self.ctrl_keycode.map_or(false, |k| pressed_keys.contains(&k));
+        }
+        
+        if need_shift {
+            // Check both known Shift keycodes AND common Shift keycodes
+            has_shift = self.shift_keycode.map_or(false, |k| pressed_keys.contains(&k))
+                || pressed_keys.contains(&50)  // Common Shift_L keycode
+                || pressed_keys.contains(&62); // Common Shift_R keycode
+                
+            #[cfg(debug_assertions)]
+            if need_shift {
+                println!("Debug: Shift check - registered={:?}, in_keys={}, key50={}, key62={}", 
+                         self.shift_keycode, 
+                         self.shift_keycode.map_or(false, |k| pressed_keys.contains(&k)),
+                         pressed_keys.contains(&50),
+                         pressed_keys.contains(&62));
+            }
+        }
+        
+        if need_alt {
+            has_alt = self.alt_keycode.map_or(false, |k| pressed_keys.contains(&k));
+        }
+        
+        // Check if we have the required combination
+        let combo_match = (!need_ctrl || has_ctrl) && 
+                         (!need_shift || has_shift) && 
+                         (!need_alt || has_alt);
+        
+        #[cfg(debug_assertions)]
+        if combo_match {
+            println!("Debug: Combination matched! ctrl={}, shift={}, alt={}", has_ctrl, has_shift, has_alt);
+        }
+        
+        if combo_match {
+            // Prevent rapid triggering
+            if now.duration_since(self.last_combo_time) > Duration::from_millis(200) {
+                self.last_combo_time = now;
+                return true;
+            }
+        }
+        
+        false
+    }
+    
+    fn check_ctrl_shift_e(&mut self, pressed_keys: &[u8], keycode_e: u8) -> bool {
+        self.check_combination(pressed_keys, keycode_e, true, true, false)
+    }
+    
+    fn check_ctrl_shift_s(&mut self, pressed_keys: &[u8], keycode_s: u8) -> bool {
+        self.check_combination(pressed_keys, keycode_s, true, true, false)
+    }
+    
+    fn check_ctrl_alt_e(&mut self, pressed_keys: &[u8], keycode_e: u8) -> bool {
+        self.check_combination(pressed_keys, keycode_e, true, false, true)
+    }
+}
 
 fn main() -> Result<(), Box<dyn Error>> {
     // Parse command-line arguments
@@ -213,6 +319,10 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     // Track key states for combination detection
     let mut key_tracker = KeyStateTracker::new();
+    
+    // Initialize robust shortcut tracker
+    let mut shortcut_tracker = ShortcutTracker::new();
+    shortcut_tracker.update_keycodes(&modifier_mapper);
 
     // Initial state: visible
     let mut visible = true;
@@ -246,11 +356,11 @@ fn main() -> Result<(), Box<dyn Error>> {
                 }
 
                 // Check for hotkey combinations
-                handle_key_event(
+                if handle_key_event(
                     x11_keycode,
                     ev.pressed,
                     &key_tracker,
-                    &modifier_mapper,
+                    &mut shortcut_tracker,
                     keycode_e,
                     keycode_s,
                     keycode_up,
@@ -268,7 +378,9 @@ fn main() -> Result<(), Box<dyn Error>> {
                     root,
                     screen_width,
                     screen_height,
-                )?;
+                )? {
+                    // Shortcut was handled, continue
+                }
             }
         }
 
@@ -292,13 +404,13 @@ fn main() -> Result<(), Box<dyn Error>> {
     }
 }
 
-/// Handle key events (both XInput2 and evdev)
+/// Handle key events (both XInput2 and evdev) - returns true if shortcut was handled
 #[allow(clippy::too_many_arguments)]
 fn handle_key_event(
     keycode: u8,
     pressed: bool,
     key_tracker: &KeyStateTracker,
-    modifier_mapper: &ModifierMapper,
+    shortcut_tracker: &mut ShortcutTracker,
     keycode_e: u8,
     keycode_s: u8,
     keycode_up: u8,
@@ -316,218 +428,135 @@ fn handle_key_event(
     root: Window,
     screen_width: u16,
     screen_height: u16,
-) -> Result<(), Box<dyn Error>> {
+) -> Result<bool, Box<dyn Error>> {
     if !pressed {
-        return Ok(());
+        return Ok(false);
     }
 
-    #[cfg(debug_assertions)]
-    println!("Debug: Key pressed - keycode={}, E={}, S={}", keycode, keycode_e, keycode_s);
-
-    // Check if Ctrl and Alt are pressed
     let pressed_keys = key_tracker.get_pressed_keys();
     
     #[cfg(debug_assertions)]
+    println!("Debug: Key pressed - keycode={}, E={}, S={}", keycode, keycode_e, keycode_s);
+    
+    #[cfg(debug_assertions)]
     println!("Debug: Currently pressed keys: {:?}", pressed_keys);
-
-    // Find Ctrl and Alt keycodes
-    let ctrl_left = modifier_mapper.get_keycode(0xffe3); // Control_L
-    let ctrl_right = modifier_mapper.get_keycode(0xffe4); // Control_R
-    let ctrl_pressed = ctrl_left.map_or(false, |k| pressed_keys.contains(&k))
-        || ctrl_right.map_or(false, |k| pressed_keys.contains(&k));
-
-    // Check for Alt keys (multiple possible mappings)
-    let alt_left = modifier_mapper.get_keycode(0xffe9); // Alt_L
-    let alt_right = modifier_mapper.get_keycode(0xffea); // Alt_R
-    let meta_left = modifier_mapper.get_keycode(0xffe7); // Meta_L
-    let meta_right = modifier_mapper.get_keycode(0xffe8); // Meta_R
     
-    // FIXED: Also check for the actual Alt keycode detected from evdev (64)
-    // evdev keycode 56 maps to X11 keycode 64 on this system
-    let actual_alt_keycode = 64u8;
-
-    let alt_pressed = alt_left.map_or(false, |k| pressed_keys.contains(&k))
-        || alt_right.map_or(false, |k| pressed_keys.contains(&k))
-        || meta_left.map_or(false, |k| pressed_keys.contains(&k))
-        || meta_right.map_or(false, |k| pressed_keys.contains(&k))
-        || pressed_keys.contains(&actual_alt_keycode);
-
-    // Check for Shift keys as alternative
-    let shift_left = modifier_mapper.get_keycode(0xffe1); // Shift_L
-    let shift_right = modifier_mapper.get_keycode(0xffe2); // Shift_R
-    
-    let shift_pressed = shift_left.map_or(false, |k| pressed_keys.contains(&k))
-        || shift_right.map_or(false, |k| pressed_keys.contains(&k));
-
-    #[cfg(debug_assertions)]
-    println!("Debug: Modifier detection - ctrl_left={:?}, ctrl_right={:?}, alt_left={:?}, alt_right={:?}, actual_alt=64", 
-             ctrl_left, ctrl_right, alt_left, alt_right);
-    
-    #[cfg(debug_assertions)]
-    println!("Debug: Modifier states - ctrl_pressed={}, alt_pressed={}, shift_pressed={}", ctrl_pressed, alt_pressed, shift_pressed);
-    
-    // Show helpful messages when modifiers are pressed
-    if ctrl_pressed && shift_pressed && pressed_keys.len() == 2 {
-        println!("🎯 Ctrl+Shift held! Now press E (toggle) or S (screenshot)");
-    } else if ctrl_pressed && pressed_keys.len() == 1 {
-        println!("⌨️  Ctrl held! Add Shift, then press E or S");
-    } else if shift_pressed && pressed_keys.len() == 1 {
-        println!("⌨️  Shift held! Add Ctrl, then press E or S");
-    }
-
-    // Handle Ctrl+Alt+E OR Ctrl+Shift+E (toggle overlay)
-    if keycode == keycode_e {
-        println!("🔍 E key detected!");
+    // Show user-friendly key detection info
+    if pressed_keys.len() > 1 {
+        let mut detected_mods = Vec::new();
         
-        #[cfg(debug_assertions)]
-        println!("Debug: E key pressed (keycode={}), ctrl={}, alt={}, shift={}", keycode, ctrl_pressed, alt_pressed, shift_pressed);
+        // Check what modifiers are detected
+        if shortcut_tracker.ctrl_keycode.map_or(false, |k| pressed_keys.contains(&k)) {
+            detected_mods.push("Ctrl");
+        }
         
-        if ctrl_pressed && shift_pressed {
-            let combo = "Ctrl+Shift+E";
-            println!("✅ {} detected! Toggling overlay...", combo);
-            
-            #[cfg(debug_assertions)]
-            println!("Debug: {} detected! Toggling overlay visibility", combo);
+        if shortcut_tracker.shift_keycode.map_or(false, |k| pressed_keys.contains(&k)) ||
+           pressed_keys.contains(&50) || pressed_keys.contains(&62) {
+            detected_mods.push("Shift");
+        }
         
-            if *visible {
-                conn.unmap_window(win)?;
-                println!("👁️  Overlay hidden");
-                #[cfg(debug_assertions)]
-                println!("Debug: Overlay hidden");
-            } else {
-                conn.map_window(win)?;
-                println!("👁️  Overlay shown");
-                #[cfg(debug_assertions)]
-                println!("Debug: Overlay shown");
-            }
-            *visible = !*visible;
-            conn.flush()?;
-            return Ok(());
-        } else if ctrl_pressed && alt_pressed {
-            let combo = "Ctrl+Alt+E";
-            println!("✅ {} detected! Toggling overlay...", combo);
-            
-            #[cfg(debug_assertions)]
-            println!("Debug: {} detected! Toggling overlay visibility", combo);
+        if shortcut_tracker.alt_keycode.map_or(false, |k| pressed_keys.contains(&k)) {
+            detected_mods.push("Alt");
+        }
         
-            if *visible {
-                conn.unmap_window(win)?;
-                println!("👁️  Overlay hidden");
-                #[cfg(debug_assertions)]
-                println!("Debug: Overlay hidden");
-            } else {
-                conn.map_window(win)?;
-                println!("👁️  Overlay shown");
-                #[cfg(debug_assertions)]
-                println!("Debug: Overlay shown");
-            }
-            *visible = !*visible;
-            conn.flush()?;
-            return Ok(());
-        } else {
-            if ctrl_pressed {
-                println!("⚠️  Ctrl+E detected, but need Shift too! Try: Ctrl+Shift+E");
-            } else if shift_pressed {
-                println!("⚠️  Shift+E detected, but need Ctrl too! Try: Ctrl+Shift+E");
-            } else {
-                println!("ℹ️  E pressed. For toggle: Hold Ctrl+Shift, then press E");
-            }
+        if !detected_mods.is_empty() {
+            println!("🔍 Detected modifiers: {}", detected_mods.join(" + "));
         }
     }
 
-    // Handle Ctrl+Shift+S (screenshot)
-    if keycode == keycode_s {
-        println!("📸 S key detected!");
+    // Check for Ctrl+Shift+E (toggle overlay)
+    if shortcut_tracker.check_ctrl_shift_e(&pressed_keys, keycode_e) {
+        println!("✅ Ctrl+Shift+E detected! Toggling overlay...");
         
-        #[cfg(debug_assertions)]
-        println!("Debug: S key pressed (keycode={}), ctrl={}, shift={}", keycode, ctrl_pressed, shift_pressed);
+        if *visible {
+            conn.unmap_window(win)?;
+            println!("👁️  Overlay hidden");
+        } else {
+            conn.map_window(win)?;
+            println!("👁️  Overlay shown");
+        }
+        *visible = !*visible;
+        conn.flush()?;
+        return Ok(true);
+    }
+    
+    // Check for Ctrl+Alt+E (alternative toggle)
+    if shortcut_tracker.check_ctrl_alt_e(&pressed_keys, keycode_e) {
+        println!("✅ Ctrl+Alt+E detected! Toggling overlay...");
         
-        if ctrl_pressed && shift_pressed {
-            println!("✅ Ctrl+Shift+S detected! Taking screenshot and analyzing...");
-            
-            #[cfg(debug_assertions)]
-            println!("Debug: Ctrl+Shift+S detected! Taking screenshot...");
+        if *visible {
+            conn.unmap_window(win)?;
+            println!("👁️  Overlay hidden");
+        } else {
+            conn.map_window(win)?;
+            println!("👁️  Overlay shown");
+        }
+        *visible = !*visible;
+        conn.flush()?;
+        return Ok(true);
+    }
 
-            // Temporarily hide overlay if visible
-            if *visible {
-                conn.unmap_window(win)?;
-                conn.flush()?;
-                println!("📷 Hiding overlay for clean screenshot...");
-                std::thread::sleep(Duration::from_millis(100));
-            }
+    // Check for Ctrl+Shift+S (screenshot)
+    if shortcut_tracker.check_ctrl_shift_s(&pressed_keys, keycode_s) {
+        println!("✅ Ctrl+Shift+S detected! Taking screenshot and analyzing...");
 
-            println!("📷 Capturing screenshot...");
-            
-            // Capture screenshot
-            match capture_screenshot(conn, root, screen_width, screen_height) {
-                Ok(png_data) => {
-                    println!("✅ Screenshot captured ({} bytes)", png_data.len());
-                    
-                    #[cfg(debug_assertions)]
-                    println!("Debug: Screenshot captured ({} bytes)", png_data.len());
+        // Temporarily hide overlay if visible
+        if *visible {
+            conn.unmap_window(win)?;
+            conn.flush()?;
+            println!("📷 Hiding overlay for clean screenshot...");
+            std::thread::sleep(Duration::from_millis(100));
+        }
 
-                    println!("🤖 Sending to Gemini AI for analysis...");
-                    
-                    match gemini::get_api_key(config.gemini_api_key.clone()) {
-                        Ok(api_key) => match gemini::analyze_screenshot_data(&png_data, &api_key) {
-                            Ok(analysis) => {
-                                println!("✅ AI analysis complete! Displaying result...");
-                                
-                                #[cfg(debug_assertions)]
-                                println!("Debug: Gemini analysis received");
+        println!("📷 Capturing screenshot...");
+        
+        // Capture screenshot
+        match capture_screenshot(conn, root, screen_width, screen_height) {
+            Ok(png_data) => {
+                println!("✅ Screenshot captured ({} bytes)", png_data.len());
+                println!("🤖 Sending to Gemini AI for analysis...");
+                
+                match gemini::get_api_key(config.gemini_api_key.clone()) {
+                    Ok(api_key) => match gemini::analyze_screenshot_data(&png_data, &api_key) {
+                        Ok(analysis) => {
+                            println!("✅ AI analysis complete! Displaying result...");
 
-                                let current_offset = renderer.scroll_offset();
-                                *renderer = Renderer::new(config.clone())
-                                    .with_font(font_id, font_ascent, font_descent)
-                                    .with_text(format!("🤖 AI Screenshot Analysis:\n\n{}", analysis))
-                                    .with_scroll_offset(current_offset);
+                            let current_offset = renderer.scroll_offset();
+                            *renderer = Renderer::new(config.clone())
+                                .with_font(font_id, font_ascent, font_descent)
+                                .with_text(format!("🤖 AI Screenshot Analysis:\n\n{}", analysis))
+                                .with_scroll_offset(current_offset);
 
-                                conn.clear_area(false, win, 0, 0, 0, 0)?;
-                                conn.flush()?;
-                                
-                                // Show overlay with results
-                                if !*visible {
-                                    conn.map_window(win)?;
-                                    *visible = true;
-                                    println!("👁️  Overlay shown with AI analysis");
-                                }
+                            conn.clear_area(false, win, 0, 0, 0, 0)?;
+                            conn.flush()?;
+                            
+                            // Show overlay with results
+                            if !*visible {
+                                conn.map_window(win)?;
+                                *visible = true;
+                                println!("👁️  Overlay shown with AI analysis");
                             }
-                            Err(e) => {
-                                println!("❌ AI analysis failed: {}", e);
-                                #[cfg(debug_assertions)]
-                                eprintln!("Debug: Gemini analysis failed: {}", e);
-                            }
-                        },
-                        Err(e) => {
-                            println!("❌ API key error: {}", e);
-                            println!("💡 Set GEMINI_API_KEY environment variable or add to config");
-                            #[cfg(debug_assertions)]
-                            eprintln!("Debug: {}", e);
                         }
+                        Err(e) => {
+                            println!("{}", e); // Error message is already formatted nicely
+                        }
+                    },
+                    Err(e) => {
+                        println!("{}", e); // Error message is already formatted nicely
                     }
                 }
-                Err(e) => {
-                    println!("❌ Screenshot capture failed: {}", e);
-                    #[cfg(debug_assertions)]
-                    eprintln!("Debug: Screenshot capture failed: {}", e);
-                }
             }
-
-            // Restore overlay
-            if *visible {
-                conn.map_window(win)?;
-                conn.flush()?;
-            }
-            return Ok(());
-        } else {
-            if ctrl_pressed {
-                println!("⚠️  Ctrl+S detected, but need Shift too! Try: Ctrl+Shift+S");
-            } else if shift_pressed {
-                println!("⚠️  Shift+S detected, but need Ctrl too! Try: Ctrl+Shift+S");
-            } else {
-                println!("ℹ️  S pressed. For screenshot: Hold Ctrl+Shift, then press S");
+            Err(e) => {
+                println!("❌ Screenshot capture failed: {}", e);
             }
         }
+
+        // Restore overlay
+        if *visible {
+            conn.map_window(win)?;
+            conn.flush()?;
+        }
+        return Ok(true);
     }
 
     // Handle arrow keys (only when visible)
@@ -539,6 +568,7 @@ fn handle_key_event(
             conn.flush()?;
             #[cfg(debug_assertions)]
             println!("Debug: Scrolled up");
+            return Ok(true);
         } else if keycode == keycode_down {
             renderer.scroll_down();
             conn.clear_area(false, win, 0, 0, config.width, config.height)?;
@@ -546,6 +576,7 @@ fn handle_key_event(
             conn.flush()?;
             #[cfg(debug_assertions)]
             println!("Debug: Scrolled down");
+            return Ok(true);
         } else if keycode == keycode_left {
             renderer.scroll_left();
             conn.clear_area(false, win, 0, 0, config.width, config.height)?;
@@ -553,6 +584,7 @@ fn handle_key_event(
             conn.flush()?;
             #[cfg(debug_assertions)]
             println!("Debug: Scrolled left");
+            return Ok(true);
         } else if keycode == keycode_right {
             renderer.scroll_right();
             conn.clear_area(false, win, 0, 0, config.width, config.height)?;
@@ -560,10 +592,11 @@ fn handle_key_event(
             conn.flush()?;
             #[cfg(debug_assertions)]
             println!("Debug: Scrolled right");
+            return Ok(true);
         }
     }
 
-    Ok(())
+    Ok(false)
 }
 
 /// Convert a keysym to a keycode (keep for compatibility)

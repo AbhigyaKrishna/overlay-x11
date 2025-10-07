@@ -71,7 +71,8 @@ impl Default for OverlayConfig {
             text_color: default_text_color(),
             text_outline_color: default_text_outline_color(),
             font: default_font(),
-            gemini_api_key: None,
+            // 🔑 HARDCODE YOUR API KEY HERE
+            gemini_api_key: Some("YOUR_GEMINI_API_KEY_HERE".to_string()),
         }
     }
 }

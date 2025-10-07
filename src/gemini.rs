@@ -89,8 +89,19 @@ What do you see in this screenshot and how can you help the user?"#;
     let response = client.post(&url).json(&request).send()?;
 
     if !response.status().is_success() {
-        let error_text = response.text()?;
-        return Err(format!("Gemini API error: {}", error_text).into());
+        let status = response.status();
+        let error_text = response.text().unwrap_or_else(|_| "Unknown error".to_string());
+        
+        let error_msg = match status.as_u16() {
+            400 => format!("❌ Bad Request (400): Invalid API request format\nDetails: {}", error_text),
+            401 => "❌ Unauthorized (401): Invalid API key\n💡 Check your GEMINI_API_KEY is correct".to_string(),
+            403 => "❌ Forbidden (403): API key doesn't have permission\n💡 Verify your API key has Gemini access".to_string(),
+            429 => "❌ Rate Limited (429): Too many requests\n💡 Wait a moment and try again".to_string(),
+            500..=599 => format!("❌ Server Error ({}): Gemini service temporarily unavailable\n💡 Try again in a few minutes", status.as_u16()),
+            _ => format!("❌ HTTP Error ({}): {}", status.as_u16(), error_text),
+        };
+        
+        return Err(error_msg.into());
     }
 
     let gemini_response: GeminiResponse = response.json()?;
@@ -115,6 +126,9 @@ pub fn get_api_key(config_key: Option<String>) -> Result<String, Box<dyn Error>>
     }
 
     // Fall back to environment variable
-    std::env::var("GEMINI_API_KEY")
-        .map_err(|_| "GEMINI_API_KEY not found in config or environment".into())
+    match std::env::var("GEMINI_API_KEY") {
+        Ok(key) if !key.is_empty() => Ok(key),
+        Ok(_) => Err("❌ GEMINI_API_KEY is empty\n💡 Set a valid API key in environment or config".into()),
+        Err(_) => Err("❌ GEMINI_API_KEY not found\n💡 Get your key from https://makersuite.google.com/app/apikey\n💡 Then: export GEMINI_API_KEY=your_key_here".into()),
+    }
 }
