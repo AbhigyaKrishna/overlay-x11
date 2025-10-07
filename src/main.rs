@@ -6,7 +6,8 @@ mod renderer;
 mod xinput2_monitor;
 
 use std::error::Error;
-use std::time::Duration;
+use std::time::{Duration, Instant};
+use std::collections::HashMap;
 use x11rb::connection::Connection;
 use x11rb::protocol::shape::ConnectionExt as _;
 use x11rb::protocol::xproto::*;
@@ -219,7 +220,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     conn.flush()?;
 
     #[cfg(debug_assertions)]
-    println!("Debug: Overlay started. Press Ctrl+Alt+E to toggle, Ctrl+Alt+S to screenshot.");
+    println!("Debug: Overlay started. Press Ctrl+Alt+E or Ctrl+Shift+E to toggle, Ctrl+Alt+S to screenshot.");
 
     // Event loop - handle both XInput2 raw events and evdev events
     loop {
@@ -345,21 +346,29 @@ fn handle_key_event(
         || meta_right.map_or(false, |k| pressed_keys.contains(&k))
         || pressed_keys.contains(&actual_alt_keycode);
 
+    // Check for Shift keys as alternative
+    let shift_left = modifier_mapper.get_keycode(0xffe1); // Shift_L
+    let shift_right = modifier_mapper.get_keycode(0xffe2); // Shift_R
+    
+    let shift_pressed = shift_left.map_or(false, |k| pressed_keys.contains(&k))
+        || shift_right.map_or(false, |k| pressed_keys.contains(&k));
+
     #[cfg(debug_assertions)]
     println!("Debug: Modifier detection - ctrl_left={:?}, ctrl_right={:?}, alt_left={:?}, alt_right={:?}, actual_alt=64", 
              ctrl_left, ctrl_right, alt_left, alt_right);
     
     #[cfg(debug_assertions)]
-    println!("Debug: Modifier states - ctrl_pressed={}, alt_pressed={}", ctrl_pressed, alt_pressed);
+    println!("Debug: Modifier states - ctrl_pressed={}, alt_pressed={}, shift_pressed={}", ctrl_pressed, alt_pressed, shift_pressed);
 
-    // Handle Ctrl+Alt+E (toggle overlay)
+    // Handle Ctrl+Alt+E OR Ctrl+Shift+E (toggle overlay)
     if keycode == keycode_e {
         #[cfg(debug_assertions)]
-        println!("Debug: E key pressed (keycode={}), ctrl={}, alt={}", keycode, ctrl_pressed, alt_pressed);
+        println!("Debug: E key pressed (keycode={}), ctrl={}, alt={}, shift={}", keycode, ctrl_pressed, alt_pressed, shift_pressed);
         
-        if ctrl_pressed && alt_pressed {
+        if ctrl_pressed && (alt_pressed || shift_pressed) {
+            let combo = if alt_pressed { "Ctrl+Alt+E" } else { "Ctrl+Shift+E" };
             #[cfg(debug_assertions)]
-            println!("Debug: Ctrl+Alt+E detected! Toggling overlay visibility");
+            println!("Debug: {} detected! Toggling overlay visibility", combo);
         
             if *visible {
                 conn.unmap_window(win)?;
