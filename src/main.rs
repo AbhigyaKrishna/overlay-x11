@@ -199,7 +199,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     println!("=== OVERLAY CONTROLS ===");
     println!("Toggle Overlay: Hold Ctrl + Shift, then press E");
-    println!("Screenshot + AI: Hold Ctrl + Shift + Q  OR  Hold Ctrl + Q");
+    println!("Screenshot + AI: Hold Ctrl + Shift, then press Q");
     println!("When overlay is visible: Use arrow keys to scroll");
     println!("========================");
 
