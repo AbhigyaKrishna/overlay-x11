@@ -177,6 +177,9 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     // Initialize modifier mapper for dynamic modifier detection
     let mut modifier_mapper = ModifierMapper::new(&conn)?;
+    
+    #[cfg(debug_assertions)]
+    println!("Debug: ModifierMapper initialized");
 
     // Use evdev monitoring for system-level stealth (no grabbing)
     let evdev_monitor = match EvdevMonitor::new() {
@@ -203,6 +206,10 @@ fn main() -> Result<(), Box<dyn Error>> {
     let keycode_left = modifier_mapper.get_keycode(XK_LEFT).ok_or("Left key not found")?;
     let keycode_right = modifier_mapper.get_keycode(XK_RIGHT).ok_or("Right key not found")?;
 
+    #[cfg(debug_assertions)]
+    println!("Debug: Keycodes mapped - E={}, S={}, Up={}, Down={}, Left={}, Right={}", 
+             keycode_e, keycode_s, keycode_up, keycode_down, keycode_left, keycode_right);
+
     // Track key states for combination detection
     let mut key_tracker = KeyStateTracker::new();
 
@@ -220,6 +227,11 @@ fn main() -> Result<(), Box<dyn Error>> {
         if let Some(ref evdev) = evdev_monitor {
             while let Some(ev) = evdev.try_recv() {
                 let x11_keycode = evdev_monitor::evdev_to_x11_keycode(ev.keycode);
+                
+                #[cfg(debug_assertions)]
+                println!("Debug: Evdev event - code={}, x11_keycode={}, pressed={}", 
+                         ev.keycode, x11_keycode, ev.pressed);
+                
                 if ev.pressed {
                     key_tracker.key_pressed(x11_keycode);
                 } else {
@@ -276,22 +288,22 @@ fn main() -> Result<(), Box<dyn Error>> {
 /// Handle key events (both XInput2 and evdev)
 #[allow(clippy::too_many_arguments)]
 fn handle_key_event(
-    keycode: Keycode,
+    keycode: u8,
     pressed: bool,
     key_tracker: &KeyStateTracker,
     modifier_mapper: &ModifierMapper,
-    keycode_e: Keycode,
-    keycode_s: Keycode,
-    keycode_up: Keycode,
-    keycode_down: Keycode,
-    keycode_left: Keycode,
-    keycode_right: Keycode,
+    keycode_e: u8,
+    keycode_s: u8,
+    keycode_up: u8,
+    keycode_down: u8,
+    keycode_left: u8,
+    keycode_right: u8,
     visible: &mut bool,
     conn: &RustConnection,
     win: Window,
     config: &OverlayConfig,
     renderer: &mut Renderer,
-    font_id: u32,
+    font_id: Font,
     font_ascent: u16,
     font_descent: u16,
     root: Window,
@@ -302,8 +314,14 @@ fn handle_key_event(
         return Ok(());
     }
 
+    #[cfg(debug_assertions)]
+    println!("Debug: Key pressed - keycode={}, E={}, S={}", keycode, keycode_e, keycode_s);
+
     // Check if Ctrl and Alt are pressed
     let pressed_keys = key_tracker.get_pressed_keys();
+    
+    #[cfg(debug_assertions)]
+    println!("Debug: Currently pressed keys: {:?}", pressed_keys);
 
     // Find Ctrl and Alt keycodes
     let ctrl_left = modifier_mapper.get_keycode(0xffe3); // Control_L
@@ -322,78 +340,98 @@ fn handle_key_event(
         || meta_left.map_or(false, |k| pressed_keys.contains(&k))
         || meta_right.map_or(false, |k| pressed_keys.contains(&k));
 
+    #[cfg(debug_assertions)]
+    println!("Debug: Modifier detection - ctrl_left={:?}, ctrl_right={:?}, alt_left={:?}, alt_right={:?}", 
+             ctrl_left, ctrl_right, alt_left, alt_right);
+    
+    #[cfg(debug_assertions)]
+    println!("Debug: Modifier states - ctrl_pressed={}, alt_pressed={}", ctrl_pressed, alt_pressed);
+
     // Handle Ctrl+Alt+E (toggle overlay)
-    if keycode == keycode_e && ctrl_pressed && alt_pressed {
-        if *visible {
-            conn.unmap_window(win)?;
+    if keycode == keycode_e {
+        #[cfg(debug_assertions)]
+        println!("Debug: E key pressed (keycode={}), ctrl={}, alt={}", keycode, ctrl_pressed, alt_pressed);
+        
+        if ctrl_pressed && alt_pressed {
             #[cfg(debug_assertions)]
-            println!("Debug: Overlay hidden");
-        } else {
-            conn.map_window(win)?;
-            #[cfg(debug_assertions)]
-            println!("Debug: Overlay shown");
+            println!("Debug: Ctrl+Alt+E detected! Toggling overlay visibility");
+        
+            if *visible {
+                conn.unmap_window(win)?;
+                #[cfg(debug_assertions)]
+                println!("Debug: Overlay hidden");
+            } else {
+                conn.map_window(win)?;
+                #[cfg(debug_assertions)]
+                println!("Debug: Overlay shown");
+            }
+            *visible = !*visible;
+            conn.flush()?;
+            return Ok(());
         }
-        *visible = !*visible;
-        conn.flush()?;
-        return Ok(());
     }
 
     // Handle Ctrl+Alt+S (screenshot)
-    if keycode == keycode_s && ctrl_pressed && alt_pressed {
+    if keycode == keycode_s {
         #[cfg(debug_assertions)]
-        println!("Debug: Taking screenshot...");
+        println!("Debug: S key pressed (keycode={}), ctrl={}, alt={}", keycode, ctrl_pressed, alt_pressed);
+        
+        if ctrl_pressed && alt_pressed {
+            #[cfg(debug_assertions)]
+            println!("Debug: Ctrl+Alt+S detected! Taking screenshot...");
 
-        // Temporarily hide overlay if visible
-        if *visible {
-            conn.unmap_window(win)?;
-            conn.flush()?;
-            std::thread::sleep(Duration::from_millis(50));
-        }
+            // Temporarily hide overlay if visible
+            if *visible {
+                conn.unmap_window(win)?;
+                conn.flush()?;
+                std::thread::sleep(Duration::from_millis(50));
+            }
 
-        // Capture screenshot
-        match capture_screenshot(conn, root, screen_width, screen_height) {
-            Ok(png_data) => {
-                #[cfg(debug_assertions)]
-                println!("Debug: Screenshot captured ({} bytes)", png_data.len());
+            // Capture screenshot
+            match capture_screenshot(conn, root, screen_width, screen_height) {
+                Ok(png_data) => {
+                    #[cfg(debug_assertions)]
+                    println!("Debug: Screenshot captured ({} bytes)", png_data.len());
 
-                match gemini::get_api_key(config.gemini_api_key.clone()) {
-                    Ok(api_key) => match gemini::analyze_screenshot_data(&png_data, &api_key) {
-                        Ok(analysis) => {
-                            #[cfg(debug_assertions)]
-                            println!("Debug: Gemini analysis received");
+                    match gemini::get_api_key(config.gemini_api_key.clone()) {
+                        Ok(api_key) => match gemini::analyze_screenshot_data(&png_data, &api_key) {
+                            Ok(analysis) => {
+                                #[cfg(debug_assertions)]
+                                println!("Debug: Gemini analysis received");
 
-                            let current_offset = renderer.scroll_offset();
-                            *renderer = Renderer::new(config.clone())
-                                .with_font(font_id, font_ascent, font_descent)
-                                .with_text(format!("Screenshot Analysis:\n\n{}", analysis))
-                                .with_scroll_offset(current_offset);
+                                let current_offset = renderer.scroll_offset();
+                                *renderer = Renderer::new(config.clone())
+                                    .with_font(font_id, font_ascent, font_descent)
+                                    .with_text(format!("Screenshot Analysis:\n\n{}", analysis))
+                                    .with_scroll_offset(current_offset);
 
-                            conn.clear_area(false, win, 0, 0, 0, 0)?;
-                            conn.flush()?;
-                        }
+                                conn.clear_area(false, win, 0, 0, 0, 0)?;
+                                conn.flush()?;
+                            }
+                            Err(e) => {
+                                #[cfg(debug_assertions)]
+                                eprintln!("Debug: Gemini analysis failed: {}", e);
+                            }
+                        },
                         Err(e) => {
                             #[cfg(debug_assertions)]
-                            eprintln!("Debug: Gemini analysis failed: {}", e);
+                            eprintln!("Debug: {}", e);
                         }
-                    },
-                    Err(e) => {
-                        #[cfg(debug_assertions)]
-                        eprintln!("Debug: {}", e);
                     }
                 }
+                Err(e) => {
+                    #[cfg(debug_assertions)]
+                    eprintln!("Debug: Screenshot capture failed: {}", e);
+                }
             }
-            Err(e) => {
-                #[cfg(debug_assertions)]
-                eprintln!("Debug: Screenshot capture failed: {}", e);
-            }
-        }
 
-        // Restore overlay
-        if *visible {
-            conn.map_window(win)?;
-            conn.flush()?;
+            // Restore overlay
+            if *visible {
+                conn.map_window(win)?;
+                conn.flush()?;
+            }
+            return Ok(());
         }
-        return Ok(());
     }
 
     // Handle arrow keys (only when visible)

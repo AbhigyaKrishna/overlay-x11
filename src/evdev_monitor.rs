@@ -146,7 +146,16 @@ pub fn evdev_to_x11_keycode(evdev_code: u16) -> u8 {
     // X11 keycodes are typically evdev codes + 8
     // This is the standard mapping used by most X servers
     if evdev_code < 248 {
-        (evdev_code + 8) as u8
+        let x11_code = (evdev_code + 8) as u8;
+        
+        #[cfg(debug_assertions)]
+        if evdev_code == keycodes::KEY_E || evdev_code == keycodes::KEY_S || 
+           evdev_code == keycodes::KEY_LEFTCTRL || evdev_code == keycodes::KEY_RIGHTCTRL ||
+           evdev_code == keycodes::KEY_LEFTALT || evdev_code == keycodes::KEY_RIGHTALT {
+            println!("Debug: Key mapping - evdev {} -> x11 {}", evdev_code, x11_code);
+        }
+        
+        x11_code
     } else {
         0
     }
