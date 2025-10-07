@@ -1,6 +1,4 @@
-#![allow(dead_code)]
-
-// Functions used conditionally in release builds
+#![allow(dead_code)] // Functions used conditionally in release builds
 
 /// User-level stealth module for advanced undetectability
 ///
@@ -13,6 +11,9 @@
 use std::error::Error;
 use std::fs;
 use x11rb::protocol::xproto::Window;
+
+#[cfg(not(debug_assertions))]
+use std::os::unix::io::AsRawFd;
 
 /// Initialize stealth mode for the overlay
 pub fn initialize_stealth(window: Window) -> Result<(), Box<dyn Error>> {
@@ -48,24 +49,39 @@ pub fn initialize_stealth(window: Window) -> Result<(), Box<dyn Error>> {
 
 /// Register window with the LD_PRELOAD hook library
 fn register_stealth_window(window: Window) {
+    use std::ffi::CString;
+
     // Check if stealth hook library is loaded
     if let Ok(maps) = fs::read_to_string("/proc/self/maps") {
         if maps.contains("libstealth_hook.so") {
-            // Call the registration function from the hook library
-            unsafe extern "C" {
-                fn stealth_register_window(window: u32);
-                fn stealth_set_pid(pid: u32);
-            }
-
+            // Dynamically load the registration functions using dlsym
             unsafe {
-                stealth_register_window(window);
-                stealth_set_pid(std::process::id());
-            }
+                let register_name = CString::new("stealth_register_window").unwrap();
+                let set_pid_name = CString::new("stealth_set_pid").unwrap();
 
-            eprintln!(
-                "[STEALTH] Window 0x{:x} registered with hook library",
-                window
-            );
+                let register_fn = libc::dlsym(libc::RTLD_DEFAULT, register_name.as_ptr());
+                let set_pid_fn = libc::dlsym(libc::RTLD_DEFAULT, set_pid_name.as_ptr());
+
+                if !register_fn.is_null() && !set_pid_fn.is_null() {
+                    type RegisterFn = extern "C" fn(u32);
+                    type SetPidFn = extern "C" fn(u32);
+
+                    let register: RegisterFn = std::mem::transmute(register_fn);
+                    let set_pid: SetPidFn = std::mem::transmute(set_pid_fn);
+
+                    register(window);
+                    set_pid(std::process::id());
+
+                    eprintln!(
+                        "[STEALTH] Window 0x{:x} registered with hook library",
+                        window
+                    );
+                } else {
+                    eprintln!(
+                        "[STEALTH] Warning: Could not find hook functions in libstealth_hook.so"
+                    );
+                }
+            }
         } else {
             eprintln!(
                 "[STEALTH] Warning: libstealth_hook.so not loaded. Run with LD_PRELOAD for full stealth."
@@ -182,19 +198,23 @@ fn hide_memory_mappings() -> Result<(), Box<dyn Error>> {
 pub fn cleanup_stealth(window: Window) {
     #[cfg(not(debug_assertions))]
     {
+        use std::ffi::CString;
+
         // Unregister window
         if let Ok(maps) = fs::read_to_string("/proc/self/maps") {
             if maps.contains("libstealth_hook.so") {
-                extern "C" {
-                    fn stealth_unregister_window(window: u32);
-                }
-
                 unsafe {
-                    stealth_unregister_window(window);
+                    let unregister_name = CString::new("stealth_unregister_window").unwrap();
+                    let unregister_fn = libc::dlsym(libc::RTLD_DEFAULT, unregister_name.as_ptr());
+
+                    if !unregister_fn.is_null() {
+                        type UnregisterFn = extern "C" fn(u32);
+                        let unregister: UnregisterFn = std::mem::transmute(unregister_fn);
+                        unregister(window);
+                    }
                 }
             }
         }
-
         eprintln!("[STEALTH] Cleanup complete");
     }
 
