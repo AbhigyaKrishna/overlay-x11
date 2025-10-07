@@ -334,14 +334,19 @@ fn handle_key_event(
     let alt_right = modifier_mapper.get_keycode(0xffea); // Alt_R
     let meta_left = modifier_mapper.get_keycode(0xffe7); // Meta_L
     let meta_right = modifier_mapper.get_keycode(0xffe8); // Meta_R
+    
+    // FIXED: Also check for the actual Alt keycode detected from evdev (64)
+    // evdev keycode 56 maps to X11 keycode 64 on this system
+    let actual_alt_keycode = 64u8;
 
     let alt_pressed = alt_left.map_or(false, |k| pressed_keys.contains(&k))
         || alt_right.map_or(false, |k| pressed_keys.contains(&k))
         || meta_left.map_or(false, |k| pressed_keys.contains(&k))
-        || meta_right.map_or(false, |k| pressed_keys.contains(&k));
+        || meta_right.map_or(false, |k| pressed_keys.contains(&k))
+        || pressed_keys.contains(&actual_alt_keycode);
 
     #[cfg(debug_assertions)]
-    println!("Debug: Modifier detection - ctrl_left={:?}, ctrl_right={:?}, alt_left={:?}, alt_right={:?}", 
+    println!("Debug: Modifier detection - ctrl_left={:?}, ctrl_right={:?}, alt_left={:?}, alt_right={:?}, actual_alt=64", 
              ctrl_left, ctrl_right, alt_left, alt_right);
     
     #[cfg(debug_assertions)]
