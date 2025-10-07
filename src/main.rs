@@ -171,6 +171,10 @@ impl ShortcutTracker {
         self.check_combination(pressed_keys, keycode_s, true, true, false)
     }
     
+    fn check_ctrl_s(&mut self, pressed_keys: &[u8], keycode_s: u8) -> bool {
+        self.check_combination(pressed_keys, keycode_s, true, false, false)
+    }
+    
     fn check_ctrl_alt_e(&mut self, pressed_keys: &[u8], keycode_e: u8) -> bool {
         self.check_combination(pressed_keys, keycode_e, true, false, true)
     }
@@ -378,11 +382,11 @@ fn main() -> Result<(), Box<dyn Error>> {
     conn.flush()?;
 
     #[cfg(debug_assertions)]
-    println!("Debug: Overlay started. Press Ctrl+Shift+E to toggle, Ctrl+Shift+S to screenshot.");
+    println!("Debug: Overlay started. Press Ctrl+Shift+E to toggle, Ctrl+Shift+S or Ctrl+S to screenshot.");
     
     println!("=== OVERLAY CONTROLS ===");
     println!("📋 Toggle Overlay: Hold Ctrl + Shift, then press E");
-    println!("📸 Screenshot + AI: Hold Ctrl + Shift, then press S");
+    println!("📸 Screenshot + AI: Hold Ctrl + Shift + S  OR  Hold Ctrl + S");
     println!("🔍 When overlay is visible: Use arrow keys to scroll");
     println!("========================");
 
@@ -599,9 +603,17 @@ fn handle_key_event(
         return Ok(true);
     }
 
-    // Check for Ctrl+Shift+S (screenshot)
-    if shortcut_tracker.check_ctrl_shift_s(&pressed_keys, keycode_s) {
-        println!("✅ Ctrl+Shift+S detected! Taking screenshot and analyzing...");
+    // Check for Ctrl+Shift+S (screenshot) or Ctrl+S (short screenshot)
+    if shortcut_tracker.check_ctrl_shift_s(&pressed_keys, keycode_s) || 
+       shortcut_tracker.check_ctrl_s(&pressed_keys, keycode_s) {
+        
+        let shortcut_name = if shortcut_tracker.check_ctrl_shift_s(&pressed_keys, keycode_s) {
+            "Ctrl+Shift+S"
+        } else {
+            "Ctrl+S"
+        };
+        
+        println!("✅ {} detected! Taking screenshot and analyzing...", shortcut_name);
         
         // Reset states immediately after detection
         shortcut_tracker.reset_modifier_states();
@@ -698,14 +710,14 @@ fn handle_key_event(
     // Debug: Show when S key is pressed but combination doesn't match
     if keycode == keycode_s {
         #[cfg(debug_assertions)]
-        println!("Debug: S key pressed but Ctrl+Shift+S not detected");
+        println!("Debug: S key pressed but screenshot shortcuts not detected");
         
         // Check individual modifiers
         let has_ctrl = shortcut_tracker.ctrl_keycode.map_or(false, |k| pressed_keys.contains(&k));
         let has_shift = shortcut_tracker.shift_keycode.map_or(false, |k| pressed_keys.contains(&k))
             || pressed_keys.contains(&50) || pressed_keys.contains(&62);
             
-        println!("📸 S key detected! Need: Ctrl={}, Shift={}", has_ctrl, has_shift);
+        println!("📸 S key detected! Ctrl={}, Shift={} (Need: Ctrl+Shift+S OR Ctrl+S)", has_ctrl, has_shift);
         
         if !has_ctrl {
             println!("⚠️  Missing Ctrl! Hold Ctrl+Shift, then press S");
