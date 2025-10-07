@@ -444,6 +444,19 @@ fn handle_key_event(
     #[cfg(debug_assertions)]
     println!("Debug: Currently pressed keys: {:?}", pressed_keys);
     
+    // Show which specific key was just pressed
+    if keycode == keycode_e {
+        println!("🔤 E key pressed!");
+    } else if keycode == keycode_s {
+        println!("🔤 S key pressed!");
+    } else if keycode == 37 { // Ctrl
+        println!("⌨️ Ctrl key pressed!");
+    } else if keycode == 50 { // Shift
+        println!("⌨️ Shift key pressed!");
+    } else {
+        println!("🔤 Key {} pressed", keycode);
+    }
+    
     // Show user-friendly key detection info
     if pressed_keys.len() > 1 {
         let mut detected_mods = Vec::new();
@@ -463,7 +476,13 @@ fn handle_key_event(
         }
         
         if !detected_mods.is_empty() {
-            println!("🔍 Detected modifiers: {}", detected_mods.join(" + "));
+            let mods_str = detected_mods.join(" + ");
+            println!("🔍 Detected modifiers: {}", mods_str);
+            
+            // Show helpful hints
+            if mods_str == "Ctrl + Shift" {
+                println!("💡 Perfect! Now press E (toggle) or S (screenshot)");
+            }
         }
     }
 
