@@ -219,6 +219,9 @@ fn main() -> Result<(), Box<dyn Error>> {
     // Track current processing thread to enable interruption
     let mut current_cancel_flag: Option<Arc<AtomicBool>> = None;
 
+    // Track last response for restoration when overlay becomes visible
+    let mut last_response_content: Option<String> = None;
+
     // Initial state: visible
     let mut visible = true;
     conn.map_window(win)?;
@@ -251,9 +254,14 @@ fn main() -> Result<(), Box<dyn Error>> {
 
             if should_process {
                 let current_offset = renderer.scroll_offset();
+                let response_text = format!("[AI] Screenshot Analysis:\n\n{}", response.content);
+
+                // Store for restoration when overlay becomes visible
+                last_response_content = Some(response_text.clone());
+
                 renderer = Renderer::new(config.clone())
                     .with_font(font_id, font_ascent, font_descent)
-                    .with_text(format!("[AI] Screenshot Analysis:\n\n{}", response.content))
+                    .with_text(response_text)
                     .with_scroll_offset(current_offset);
 
                 // Clear loading state
@@ -340,6 +348,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                     &mut loading_message,
                     &mut loading_start_time,
                     &mut current_cancel_flag,
+                    &mut last_response_content,
                 )? {
                     // Shortcut was handled, continue
                 }
@@ -391,6 +400,7 @@ fn handle_key_event(
     loading_message: &mut String,
     loading_start_time: &mut Option<std::time::Instant>,
     current_cancel_flag: &mut Option<Arc<AtomicBool>>,
+    last_response_content: &mut Option<String>,
 ) -> Result<bool, Box<dyn Error>> {
     // Only process shortcut combinations on key press events
     if !pressed {
@@ -443,6 +453,14 @@ fn handle_key_event(
         if *visible {
             conn.unmap_window(win)?;
         } else {
+            // Restore last AI response when showing overlay
+            if let Some(ref last_content) = *last_response_content {
+                let current_offset = renderer.scroll_offset();
+                *renderer = Renderer::new(config.clone())
+                    .with_font(font_id, font_ascent, font_descent)
+                    .with_text(last_content.clone())
+                    .with_scroll_offset(current_offset);
+            }
             conn.map_window(win)?;
         }
         *visible = !*visible;
