@@ -4,6 +4,7 @@ mod gemini;
 mod modifier_mapper;
 mod renderer;
 mod shortcut_tracker;
+mod prompt;
 
 use std::error::Error;
 use std::sync::Arc;

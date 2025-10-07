@@ -4,6 +4,8 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
+use crate::prompt;
+
 const GEMINI_API_URL: &str =
     "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent";
 
@@ -64,18 +66,11 @@ pub fn analyze_screenshot_data(
     // Base64 encode the PNG data
     let base64_image = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, png_data);
 
-    // Create the request with a meta prompt
-    let meta_prompt = r#"You are an AI assistant answering questions. 
-If the input is a multiple-choice question (MCQ), reply ONLY with the correct option letter (A, B, C, or D) and nothing else.
-If the input is a one-word or short-answer question, reply with a short, crisp answer (just a word or a brief phrase).
-If the input is a longer question, answer as briefly and concisely as possible.
-Never add explanations or extra text. Only give the answer."#;
-
     let request = GeminiRequest {
         contents: vec![Content {
             parts: vec![
                 Part::Text {
-                    text: meta_prompt.to_string(),
+                    text: prompt::AI_PROMPT.to_string(),
                 },
                 Part::InlineData {
                     inline_data: InlineData {
