@@ -21,7 +21,8 @@ use xinput2_monitor::KeyStateTracker;
 
 // X11 keysyms
 const XK_E: u32 = 0x0065; // 'E' key
-const XK_S: u32 = 0x0073; // 'S' key
+const XK_Q: u32 = 0x0071; // 'Q' key
+const XK_S: u32 = 0x0073; // 'S' key (kept for reference)
 const XK_UP: u32 = 0xff52; // Up arrow
 const XK_DOWN: u32 = 0xff54; // Down arrow
 const XK_LEFT: u32 = 0xff51; // Left arrow
@@ -177,12 +178,12 @@ impl ShortcutTracker {
         self.check_combination(pressed_keys, keycode_e, true, true, false)
     }
     
-    fn check_ctrl_shift_s(&mut self, pressed_keys: &[u8], keycode_s: u8) -> bool {
-        self.check_combination(pressed_keys, keycode_s, true, true, false)
+    fn check_ctrl_shift_q(&mut self, pressed_keys: &[u8], keycode_q: u8) -> bool {
+        self.check_combination(pressed_keys, keycode_q, true, true, false)
     }
     
-    fn check_ctrl_s(&mut self, pressed_keys: &[u8], keycode_s: u8) -> bool {
-        self.check_combination(pressed_keys, keycode_s, true, false, false)
+    fn check_ctrl_q(&mut self, pressed_keys: &[u8], keycode_q: u8) -> bool {
+        self.check_combination(pressed_keys, keycode_q, true, false, false)
     }
     
     fn check_ctrl_alt_e(&mut self, pressed_keys: &[u8], keycode_e: u8) -> bool {
@@ -363,18 +364,18 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     // Get keycodes for our hotkeys
     let keycode_e = modifier_mapper.get_keycode(XK_E).ok_or("E key not found")?;
-    let keycode_s = modifier_mapper.get_keycode(XK_S).ok_or("S key not found")?;
+    let keycode_q = modifier_mapper.get_keycode(XK_Q).ok_or("Q key not found")?;
     let keycode_up = modifier_mapper.get_keycode(XK_UP).ok_or("Up key not found")?;
     let keycode_down = modifier_mapper.get_keycode(XK_DOWN).ok_or("Down key not found")?;
     let keycode_left = modifier_mapper.get_keycode(XK_LEFT).ok_or("Left key not found")?;
     let keycode_right = modifier_mapper.get_keycode(XK_RIGHT).ok_or("Right key not found")?;
 
     #[cfg(debug_assertions)]
-    println!("Debug: Keycodes mapped - E={}, S={}, Up={}, Down={}, Left={}, Right={}", 
-             keycode_e, keycode_s, keycode_up, keycode_down, keycode_left, keycode_right);
+    println!("Debug: Keycodes mapped - E={}, Q={}, Up={}, Down={}, Left={}, Right={}", 
+             keycode_e, keycode_q, keycode_up, keycode_down, keycode_left, keycode_right);
              
-    // Also log the S keycode specifically for debugging
-    println!("🔧 S key mapped to keycode: {}", keycode_s);
+    // Also log the Q keycode specifically for debugging
+    println!("🔧 Q key mapped to keycode: {}", keycode_q);
 
     // Track key states for combination detection
     let mut key_tracker = KeyStateTracker::new();
@@ -392,11 +393,11 @@ fn main() -> Result<(), Box<dyn Error>> {
     conn.flush()?;
 
     #[cfg(debug_assertions)]
-    println!("Debug: Overlay started. Press Ctrl+Shift+E to toggle, Ctrl+Shift+S or Ctrl+S to screenshot.");
+    println!("Debug: Overlay started. Press Ctrl+Shift+E to toggle, Ctrl+Shift+Q or Ctrl+Q to screenshot.");
     
     println!("=== OVERLAY CONTROLS ===");
     println!("📋 Toggle Overlay: Hold Ctrl + Shift, then press E");
-    println!("📸 Screenshot + AI: Hold Ctrl + Shift + S  OR  Hold Ctrl + S");
+    println!("📸 Screenshot + AI: Hold Ctrl + Shift + Q  OR  Hold Ctrl + Q");
     println!("🔍 When overlay is visible: Use arrow keys to scroll");
     println!("========================");
 
@@ -434,7 +435,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                     &mut key_tracker,
                     &mut shortcut_tracker,
                     keycode_e,
-                    keycode_s,
+                    keycode_q,
                     keycode_up,
                     keycode_down,
                     keycode_left,
@@ -484,7 +485,7 @@ fn handle_key_event(
     key_tracker: &mut KeyStateTracker,
     shortcut_tracker: &mut ShortcutTracker,
     keycode_e: u8,
-    keycode_s: u8,
+    keycode_q: u8,
     keycode_up: u8,
     keycode_down: u8,
     keycode_left: u8,
@@ -532,7 +533,7 @@ fn handle_key_event(
     }
     
     #[cfg(debug_assertions)]
-    println!("Debug: Key pressed - keycode={}, E={}, S={}", keycode, keycode_e, keycode_s);
+    println!("Debug: Key pressed - keycode={}, E={}, Q={}", keycode, keycode_e, keycode_q);
     
     #[cfg(debug_assertions)]
     println!("Debug: Currently pressed keys: {:?}", pressed_keys);
@@ -540,8 +541,8 @@ fn handle_key_event(
     // Show which specific key was just pressed
     if keycode == keycode_e {
         println!("🔤 E key pressed!");
-    } else if keycode == keycode_s {
-        println!("🔤 S key pressed!");
+    } else if keycode == keycode_q {
+        println!("🔤 Q key pressed!");
     } else if keycode == 37 { // Ctrl
         println!("⌨️ Ctrl key pressed!");
     } else if keycode == 50 { // Shift
@@ -617,14 +618,14 @@ fn handle_key_event(
         return Ok(true);
     }
 
-    // Check for Ctrl+Shift+S (screenshot) or Ctrl+S (short screenshot)
-    if shortcut_tracker.check_ctrl_shift_s(&pressed_keys, keycode_s) || 
-       shortcut_tracker.check_ctrl_s(&pressed_keys, keycode_s) {
+    // Check for Ctrl+Shift+Q (screenshot) or Ctrl+Q (short screenshot)
+    if shortcut_tracker.check_ctrl_shift_q(&pressed_keys, keycode_q) || 
+       shortcut_tracker.check_ctrl_q(&pressed_keys, keycode_q) {
         
-        let shortcut_name = if shortcut_tracker.check_ctrl_shift_s(&pressed_keys, keycode_s) {
-            "Ctrl+Shift+S"
+        let shortcut_name = if shortcut_tracker.check_ctrl_shift_q(&pressed_keys, keycode_q) {
+            "Ctrl+Shift+Q"
         } else {
-            "Ctrl+S"
+            "Ctrl+Q"
         };
         
         println!("✅ {} detected! Taking screenshot and analyzing...", shortcut_name);
@@ -717,17 +718,17 @@ fn handle_key_event(
         return Ok(true);
     }
     
-    // Debug: Show when S key is pressed but combination doesn't match
-    if keycode == keycode_s {
+    // Debug: Show when Q key is pressed but combination doesn't match
+    if keycode == keycode_q {
         #[cfg(debug_assertions)]
-        println!("Debug: S key pressed but screenshot shortcuts not detected");
+        println!("Debug: Q key pressed but screenshot shortcuts not detected");
         
         // Check individual modifiers
         let has_ctrl = shortcut_tracker.ctrl_keycode.map_or(false, |k| pressed_keys.contains(&k));
         let has_shift = shortcut_tracker.shift_keycode.map_or(false, |k| pressed_keys.contains(&k))
             || pressed_keys.contains(&50) || pressed_keys.contains(&62);
             
-        println!("📸 S key detected! Ctrl={}, Shift={} (Need: Ctrl+Shift+S OR Ctrl+S)", has_ctrl, has_shift);
+        println!("📸 Q key detected! Ctrl={}, Shift={} (Need: Ctrl+Shift+Q OR Ctrl+Q)", has_ctrl, has_shift);
         
         if !has_ctrl {
             println!("⚠️  Missing Ctrl! Hold Ctrl+Shift, then press S");
