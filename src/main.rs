@@ -34,6 +34,10 @@ struct ShortcutTracker {
     alt_keycode: Option<u8>,
     last_combo_time: Instant,
     combo_timeout: Duration,
+    // Track recent modifier presses for timing tolerance
+    recent_ctrl: Option<Instant>,
+    recent_shift: Option<Instant>,
+    recent_alt: Option<Instant>,
 }
 
 impl ShortcutTracker {
@@ -44,6 +48,9 @@ impl ShortcutTracker {
             alt_keycode: None,
             last_combo_time: Instant::now(),
             combo_timeout: Duration::from_millis(500), // 500ms window for combinations
+            recent_ctrl: None,
+            recent_shift: None,
+            recent_alt: None,
         }
     }
     
@@ -71,33 +78,53 @@ impl ShortcutTracker {
             return false;
         }
         
+        // Update recent modifier timestamps
+        if let Some(ctrl_key) = self.ctrl_keycode {
+            if pressed_keys.contains(&ctrl_key) {
+                self.recent_ctrl = Some(now);
+            }
+        }
+        
+        if let Some(shift_key) = self.shift_keycode {
+            if pressed_keys.contains(&shift_key) || pressed_keys.contains(&50) || pressed_keys.contains(&62) {
+                self.recent_shift = Some(now);
+            }
+        }
+        
+        if let Some(alt_key) = self.alt_keycode {
+            if pressed_keys.contains(&alt_key) {
+                self.recent_alt = Some(now);
+            }
+        }
+        
         let mut has_ctrl = false;
         let mut has_shift = false;
         let mut has_alt = false;
         
-        // Check modifiers
+        // Check modifiers with timing tolerance
         if need_ctrl {
-            has_ctrl = self.ctrl_keycode.map_or(false, |k| pressed_keys.contains(&k));
+            has_ctrl = self.ctrl_keycode.map_or(false, |k| pressed_keys.contains(&k))
+                || self.recent_ctrl.map_or(false, |t| now.duration_since(t) < Duration::from_millis(300));
         }
         
         if need_shift {
-            // Check both known Shift keycodes AND common Shift keycodes
             has_shift = self.shift_keycode.map_or(false, |k| pressed_keys.contains(&k))
-                || pressed_keys.contains(&50)  // Common Shift_L keycode
-                || pressed_keys.contains(&62); // Common Shift_R keycode
+                || pressed_keys.contains(&50) || pressed_keys.contains(&62)
+                || self.recent_shift.map_or(false, |t| now.duration_since(t) < Duration::from_millis(300));
                 
             #[cfg(debug_assertions)]
             if need_shift {
-                println!("Debug: Shift check - registered={:?}, in_keys={}, key50={}, key62={}", 
-                         self.shift_keycode, 
-                         self.shift_keycode.map_or(false, |k| pressed_keys.contains(&k)),
-                         pressed_keys.contains(&50),
-                         pressed_keys.contains(&62));
+                let shift_currently = self.shift_keycode.map_or(false, |k| pressed_keys.contains(&k))
+                    || pressed_keys.contains(&50) || pressed_keys.contains(&62);
+                let shift_recent = self.recent_shift.map_or(false, |t| now.duration_since(t) < Duration::from_millis(300));
+                println!("Debug: Shift check - currently={}, recent={}, combined={}", 
+                         shift_currently, shift_recent, has_shift);
             }
         }
         
         if need_alt {
-            has_alt = self.alt_keycode.map_or(false, |k| pressed_keys.contains(&k));
+            has_alt = self.alt_keycode.map_or(false, |k| pressed_keys.contains(&k))
+                || self.recent_alt.map_or(false, |t| now.duration_since(t) < Duration::from_millis(300));
         }
         
         // Check if we have the required combination
