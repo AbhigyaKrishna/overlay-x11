@@ -7,15 +7,15 @@ use x11rb::protocol::xproto::Keycode;
 pub struct ShortcutTracker {
     // Key state tracking
     pressed_keys: HashSet<Keycode>,
-    
+
     // Modifier keycodes
     ctrl_keycodes: Vec<Keycode>,
     shift_keycodes: Vec<Keycode>,
-    
+
     // Target key keycodes
     keycode_e: Option<Keycode>,
     keycode_q: Option<Keycode>,
-    
+
     // Simple state tracking for immediate response
     last_trigger_time: Option<Instant>,
 }
@@ -45,12 +45,12 @@ impl ShortcutTracker {
     /// Check if Ctrl+Shift+E is currently pressed (instant detection)
     pub fn check_ctrl_shift_e(&mut self, keycode_e: u8) -> bool {
         let keycode_e = keycode_e as Keycode;
-        
+
         // Check if all required keys are currently pressed
         let ctrl_pressed = self.is_ctrl_pressed();
         let shift_pressed = self.is_shift_pressed();
         let e_pressed = self.pressed_keys.contains(&keycode_e);
-        
+
         // Immediate detection without debouncing
         if ctrl_pressed && shift_pressed && e_pressed {
             // Optional: Prevent extremely rapid triggering (1ms minimum)
@@ -60,25 +60,25 @@ impl ShortcutTracker {
                     return false;
                 }
             }
-            
+
             self.last_trigger_time = Some(now);
             return true;
         }
-        
+
         false
     }
 
-    /// Check if Ctrl+Shift+Q is currently pressed (instant detection)
-    pub fn check_ctrl_shift_q(&mut self, keycode_q: u8) -> bool {
-        let keycode_q = keycode_q as Keycode;
-        
+    /// Check if Ctrl+Shift+B is currently pressed (instant detection)
+    pub fn check_ctrl_shift_b(&mut self, keycode_b: u8) -> bool {
+        let keycode_b = keycode_b as Keycode;
+
         // Check if all required keys are currently pressed
         let ctrl_pressed = self.is_ctrl_pressed();
         let shift_pressed = self.is_shift_pressed();
-        let q_pressed = self.pressed_keys.contains(&keycode_q);
-        
+        let b_pressed = self.pressed_keys.contains(&keycode_b);
+
         // Immediate detection without debouncing
-        if ctrl_pressed && shift_pressed && q_pressed {
+        if ctrl_pressed && shift_pressed && b_pressed {
             // Optional: Prevent extremely rapid triggering (1ms minimum)
             let now = Instant::now();
             if let Some(last_time) = self.last_trigger_time {
@@ -86,11 +86,11 @@ impl ShortcutTracker {
                     return false;
                 }
             }
-            
+
             self.last_trigger_time = Some(now);
             return true;
         }
-        
+
         false
     }
 
@@ -130,7 +130,7 @@ impl ShortcutTracker {
                 self.shift_keycodes.push(shift_r);
             }
         }
-        
+
         self.keycode_e = modifier_mapper.get_keycode(0x0065);
         self.keycode_q = modifier_mapper.get_keycode(0x0071);
     }

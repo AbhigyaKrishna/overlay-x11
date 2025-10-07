@@ -26,7 +26,7 @@ use crossbeam_channel::{Receiver, Sender, unbounded};
 
 // X11 keysyms
 const XK_E: u32 = 0x0065; // 'E' key
-const XK_Q: u32 = 0x0071; // 'Q' key
+const XK_B: u32 = 0x0062; // 'B' key
 const XK_UP: u32 = 0xff52; // Up arrow
 const XK_DOWN: u32 = 0xff54; // Down arrow
 const XK_LEFT: u32 = 0xff51; // Left arrow
@@ -184,7 +184,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     // Get keycodes for our hotkeys
     let keycode_e = modifier_mapper.get_keycode(XK_E).ok_or("E key not found")?;
-    let keycode_q = modifier_mapper.get_keycode(XK_Q).ok_or("Q key not found")?;
+    let keycode_b = modifier_mapper.get_keycode(XK_B).ok_or("B key not found")?;
     let keycode_up = modifier_mapper
         .get_keycode(XK_UP)
         .ok_or("Up key not found")?;
@@ -231,7 +231,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     {
         println!("=== OVERLAY CONTROLS ===");
         println!("Toggle Overlay: Hold Ctrl + Shift, then press E");
-        println!("Screenshot + AI: Hold Ctrl + Shift, then press Q");
+        println!("Screenshot + AI: Hold Ctrl + Shift, then press B");
         println!("When overlay is visible: Use arrow keys to scroll");
         println!("========================");
     }
@@ -327,7 +327,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                     ev.pressed,
                     &mut shortcut_tracker,
                     keycode_e,
-                    keycode_q,
+                    keycode_b,
                     keycode_up,
                     keycode_down,
                     keycode_left,
@@ -379,7 +379,7 @@ fn handle_key_event(
     pressed: bool,
     shortcut_tracker: &mut ShortcutTracker,
     keycode_e: u8,
-    keycode_q: u8,
+    keycode_b: u8,
     keycode_up: u8,
     keycode_down: u8,
     keycode_left: u8,
@@ -468,8 +468,8 @@ fn handle_key_event(
         return Ok(true);
     }
 
-    // Check for Ctrl+Shift+Q (screenshot) - IMPROVED VERSION with background processing
-    if shortcut_tracker.check_ctrl_shift_q(keycode_q) {
+    // Check for Ctrl+Shift+B (screenshot) - IMPROVED VERSION with background processing
+    if shortcut_tracker.check_ctrl_shift_b(keycode_b) {
         // If already processing, interrupt the previous request
         if *screenshot_processing {
             if let Some(cancel_flag) = current_cancel_flag.as_ref() {
