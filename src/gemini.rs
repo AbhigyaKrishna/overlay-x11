@@ -83,17 +83,19 @@ Never add explanations or extra text. Only give the answer."#;
 
     if !response.status().is_success() {
         let status = response.status();
-        let error_text = response.text().unwrap_or_else(|_| "Unknown error".to_string());
-        
+        let error_text = response
+            .text()
+            .unwrap_or_else(|_| "Unknown error".to_string());
+
         let error_msg = match status.as_u16() {
-            400 => format!("❌ Bad Request (400): Invalid API request format\nDetails: {}", error_text),
-            401 => "❌ Unauthorized (401): Invalid API key\n💡 Check your GEMINI_API_KEY is correct".to_string(),
-            403 => "❌ Forbidden (403): API key doesn't have permission\n💡 Verify your API key has Gemini access".to_string(),
-            429 => "❌ Rate Limited (429): Too many requests\n💡 Wait a moment and try again".to_string(),
-            500..=599 => format!("❌ Server Error ({}): Gemini service temporarily unavailable\n💡 Try again in a few minutes", status.as_u16()),
-            _ => format!("❌ HTTP Error ({}): {}", status.as_u16(), error_text),
+            400 => format!("[ERROR] Bad Request (400): Invalid API request format\nDetails: {}", error_text),
+            401 => "[ERROR] Unauthorized (401): Invalid API key\nHint: Check your GEMINI_API_KEY is correct".to_string(),
+            403 => "[ERROR] Forbidden (403): API key doesn't have permission\nHint: Verify your API key has Gemini access".to_string(),
+            429 => "[ERROR] Rate Limited (429): Too many requests\nHint: Wait a moment and try again".to_string(),
+            500..=599 => format!("[ERROR] Server Error ({}): Gemini service temporarily unavailable\nHint: Try again in a few minutes", status.as_u16()),
+            _ => format!("[ERROR] HTTP Error ({}): {}", status.as_u16(), error_text),
         };
-        
+
         return Err(error_msg.into());
     }
 
@@ -121,7 +123,7 @@ pub fn get_api_key(config_key: Option<String>) -> Result<String, Box<dyn Error>>
     // Fall back to environment variable
     match std::env::var("GEMINI_API_KEY") {
         Ok(key) if !key.is_empty() => Ok(key),
-        Ok(_) => Err("❌ GEMINI_API_KEY is empty\n💡 Set a valid API key in environment or config".into()),
-        Err(_) => Err("❌ GEMINI_API_KEY not found\n💡 Get your key from https://makersuite.google.com/app/apikey\n💡 Then: export GEMINI_API_KEY=your_key_here".into()),
+        Ok(_) => Err("[ERROR] GEMINI_API_KEY is empty\nHint: Set a valid API key in environment or config".into()),
+        Err(_) => Err("[ERROR] GEMINI_API_KEY not found\nHint: Get your key from https://makersuite.google.com/app/apikey\nHint: Then: export GEMINI_API_KEY=your_key_here".into()),
     }
 }

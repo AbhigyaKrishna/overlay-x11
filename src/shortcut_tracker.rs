@@ -73,13 +73,28 @@ impl ShortcutTracker {
     /// Track key press event
     pub fn key_pressed(&mut self, keycode: Keycode) {
         self.pressed_keys.insert(keycode);
+
+        #[cfg(debug_assertions)]
+        println!(
+            "Key {} pressed. Total keys: {:?}",
+            keycode, self.pressed_keys
+        );
+
         self.update_state_machine();
     }
 
     /// Track key release event
     pub fn key_released(&mut self, keycode: Keycode) {
         self.pressed_keys.remove(&keycode);
-        self.update_state_machine();
+
+        #[cfg(debug_assertions)]
+        println!(
+            "Key {} released. Remaining keys: {:?}",
+            keycode, self.pressed_keys
+        );
+
+        // Don't update state machine on release - we only care about presses for shortcuts
+        // The state will auto-reset after debounce timeout or when checked
     }
 
     /// Main state machine logic
@@ -210,13 +225,15 @@ impl ShortcutTracker {
                 }
             }
 
-            ShortcutState::Complete { timestamp, .. } => {
-                // Auto-reset after debounce period
-                if now.duration_since(*timestamp) > self.debounce_timeout {
-                    #[cfg(debug_assertions)]
-                    println!("State: Complete → Idle (debounce period ended)");
-
-                    self.state = ShortcutState::Idle;
+            ShortcutState::Complete { shortcut_type, .. } => {
+                // Stay in Complete state until shortcut is consumed via check_* methods
+                // This ensures the shortcut is detected even if keys are released quickly
+                #[cfg(debug_assertions)]
+                if self.pressed_keys.is_empty() {
+                    println!(
+                        "State: Complete({:?}) - all keys released, waiting to be consumed",
+                        shortcut_type
+                    );
                 }
             }
         }
@@ -224,43 +241,76 @@ impl ShortcutTracker {
 
     /// Check if specific shortcut combinations are active
     pub fn check_ctrl_shift_e(&mut self, _keycode_e: u8) -> bool {
-        matches!(
+        let detected = matches!(
             self.state,
             ShortcutState::Complete {
                 shortcut_type: ShortcutType::CtrlShiftE,
                 ..
             }
-        )
+        );
+
+        if detected {
+            // Reset state after detection to prevent repeated triggers
+            self.state = ShortcutState::Idle;
+            #[cfg(debug_assertions)]
+            println!("[OK] Ctrl+Shift+E consumed, resetting to Idle");
+        }
+
+        detected
     }
 
     pub fn check_ctrl_shift_q(&mut self, _keycode_q: u8) -> bool {
-        matches!(
+        let detected = matches!(
             self.state,
             ShortcutState::Complete {
                 shortcut_type: ShortcutType::CtrlShiftQ,
                 ..
             }
-        )
+        );
+
+        if detected {
+            self.state = ShortcutState::Idle;
+            #[cfg(debug_assertions)]
+            println!("[OK] Ctrl+Shift+Q consumed, resetting to Idle");
+        }
+
+        detected
     }
 
     pub fn check_ctrl_q(&mut self, _keycode_q: u8) -> bool {
-        matches!(
+        let detected = matches!(
             self.state,
             ShortcutState::Complete {
                 shortcut_type: ShortcutType::CtrlQ,
                 ..
             }
-        )
+        );
+
+        if detected {
+            self.state = ShortcutState::Idle;
+            #[cfg(debug_assertions)]
+            println!("[OK] Ctrl+Q consumed, resetting to Idle");
+        }
+
+        detected
     }
 
     pub fn check_ctrl_alt_e(&mut self, _keycode_e: u8) -> bool {
-        matches!(
+        let detected = matches!(
             self.state,
             ShortcutState::Complete {
                 shortcut_type: ShortcutType::CtrlAltE,
                 ..
             }
-        )
+        );
+
+        if detected {
+            self.state = ShortcutState::Idle;
+            #[cfg(debug_assertions)]
+            println!("[OK] Ctrl+Alt+E consumed, resetting to Idle");
+        }
+
+        detected
     }
 
     /// Helper functions

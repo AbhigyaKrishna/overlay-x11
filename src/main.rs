@@ -242,9 +242,9 @@ fn main() -> Result<(), Box<dyn Error>> {
     );
 
     println!("=== OVERLAY CONTROLS ===");
-    println!("📋 Toggle Overlay: Hold Ctrl + Shift, then press E");
-    println!("📸 Screenshot + AI: Hold Ctrl + Shift + Q  OR  Hold Ctrl + Q");
-    println!("🔍 When overlay is visible: Use arrow keys to scroll");
+    println!("Toggle Overlay: Hold Ctrl + Shift, then press E");
+    println!("Screenshot + AI: Hold Ctrl + Shift + Q  OR  Hold Ctrl + Q");
+    println!("When overlay is visible: Use arrow keys to scroll");
     println!("========================");
 
     // Event loop - handle both XInput2 raw events and evdev events
@@ -396,17 +396,17 @@ fn handle_key_event(
 
     // Show which specific key was just pressed
     if keycode == keycode_e {
-        println!("🔤 E key pressed!");
+        println!("Key: E key pressed!");
     } else if keycode == keycode_q {
-        println!("🔤 Q key pressed!");
+        println!("Key: Q key pressed!");
     } else if keycode == 37 {
         // Ctrl
-        println!("⌨️ Ctrl key pressed!");
+        println!("Key: Ctrl key pressed!");
     } else if keycode == 50 {
         // Shift
-        println!("⌨️ Shift key pressed!");
+        println!("Key: Shift key pressed!");
     } else {
-        println!("🔤 Key {} pressed", keycode);
+        println!("Key: {} pressed", keycode);
     }
 
     // Show user-friendly key detection info
@@ -439,11 +439,11 @@ fn handle_key_event(
 
         if !detected_mods.is_empty() {
             let mods_str = detected_mods.join(" + ");
-            println!("🔍 Detected modifiers: {}", mods_str);
+            println!("Detected modifiers: {}", mods_str);
 
             // Show helpful hints
             if mods_str == "Ctrl + Shift" {
-                println!("💡 Perfect! Now press E (toggle) or S (screenshot)");
+                println!("Hint: Perfect! Now press E (toggle) or S (screenshot)");
             }
         }
     }
@@ -476,10 +476,10 @@ fn handle_key_event(
 
         if *visible {
             conn.unmap_window(win)?;
-            println!("👁️  Overlay hidden");
+            println!("Overlay hidden");
         } else {
             conn.map_window(win)?;
-            println!("👁️  Overlay shown");
+            println!("Overlay shown");
         }
         *visible = !*visible;
         conn.flush()?;
@@ -495,7 +495,7 @@ fn handle_key_event(
         };
 
         println!(
-            "✅ {} detected! Taking screenshot and analyzing...",
+            "[OK] {} detected! Taking screenshot and analyzing...",
             shortcut_name
         );
 
@@ -510,7 +510,7 @@ fn handle_key_event(
         if *visible {
             conn.unmap_window(win)?;
             conn.flush()?;
-            println!("📷 Hiding overlay for clean screenshot...");
+            println!("Hiding overlay for clean screenshot...");
             std::thread::sleep(Duration::from_millis(100));
 
             #[cfg(debug_assertions)]
@@ -613,24 +613,27 @@ fn handle_key_event(
             || pressed_keys.contains(&62);
 
         println!(
-            "📸 Q key detected! Ctrl={}, Shift={} (Need: Ctrl+Shift+Q OR Ctrl+Q)",
+            "Q key detected! Ctrl={}, Shift={} (Need: Ctrl+Shift+Q OR Ctrl+Q)",
             has_ctrl, has_shift
         );
 
         if !has_ctrl {
-            println!("⚠️  Missing Ctrl! Hold Ctrl+Shift, then press S");
+            println!("Warning: Missing Ctrl! Hold Ctrl+Shift, then press S");
         } else if !has_shift {
-            println!("⚠️  Missing Shift! Hold Ctrl+Shift, then press S");
+            println!("Warning: Missing Shift! Hold Ctrl+Shift, then press S");
         }
 
         // FALLBACK: Simple combination check for testing
         if has_ctrl && has_shift {
-            println!("🔧 Fallback: Attempting screenshot with simple detection...");
+            println!("Fallback: Attempting screenshot with simple detection...");
 
             // Simple screenshot attempt
             match capture_screenshot(conn, root, screen_width, screen_height) {
                 Ok(png_data) => {
-                    println!("✅ Fallback screenshot captured ({} bytes)", png_data.len());
+                    println!(
+                        "[OK] Fallback screenshot captured ({} bytes)",
+                        png_data.len()
+                    );
 
                     // Simple text display without Gemini for testing
                     let current_offset = renderer.scroll_offset();
@@ -649,7 +652,7 @@ fn handle_key_event(
                     }
                 }
                 Err(e) => {
-                    println!("❌ Fallback screenshot failed: {}", e);
+                    println!("[ERROR] Fallback screenshot failed: {}", e);
                 }
             }
             return Ok(true);
