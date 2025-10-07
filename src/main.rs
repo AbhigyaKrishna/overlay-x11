@@ -316,6 +316,9 @@ fn main() -> Result<(), Box<dyn Error>> {
     #[cfg(debug_assertions)]
     println!("Debug: Keycodes mapped - E={}, S={}, Up={}, Down={}, Left={}, Right={}", 
              keycode_e, keycode_s, keycode_up, keycode_down, keycode_left, keycode_right);
+             
+    // Also log the S keycode specifically for debugging
+    println!("🔧 S key mapped to keycode: {}", keycode_s);
 
     // Track key states for combination detection
     let mut key_tracker = KeyStateTracker::new();
@@ -499,6 +502,10 @@ fn handle_key_event(
     // Check for Ctrl+Shift+S (screenshot)
     if shortcut_tracker.check_ctrl_shift_s(&pressed_keys, keycode_s) {
         println!("✅ Ctrl+Shift+S detected! Taking screenshot and analyzing...");
+        
+        // Debug: Show what we're about to do
+        #[cfg(debug_assertions)]
+        println!("Debug: Starting screenshot process...");
 
         // Temporarily hide overlay if visible
         if *visible {
@@ -506,9 +513,16 @@ fn handle_key_event(
             conn.flush()?;
             println!("📷 Hiding overlay for clean screenshot...");
             std::thread::sleep(Duration::from_millis(100));
+            
+            #[cfg(debug_assertions)]
+            println!("Debug: Overlay hidden, starting capture...");
         }
 
         println!("📷 Capturing screenshot...");
+        
+        // Debug: Show screenshot attempt
+        #[cfg(debug_assertions)]
+        println!("Debug: Calling capture_screenshot with {}x{}", screen_width, screen_height);
         
         // Capture screenshot
         match capture_screenshot(conn, root, screen_width, screen_height) {
@@ -516,38 +530,55 @@ fn handle_key_event(
                 println!("✅ Screenshot captured ({} bytes)", png_data.len());
                 println!("🤖 Sending to Gemini AI for analysis...");
                 
+                #[cfg(debug_assertions)]
+                println!("Debug: Screenshot successful, checking API key...");
+                
                 match gemini::get_api_key(config.gemini_api_key.clone()) {
-                    Ok(api_key) => match gemini::analyze_screenshot_data(&png_data, &api_key) {
-                        Ok(analysis) => {
-                            println!("✅ AI analysis complete! Displaying result...");
+                    Ok(api_key) => {
+                        #[cfg(debug_assertions)]
+                        println!("Debug: API key found, sending to Gemini...");
+                        
+                        match gemini::analyze_screenshot_data(&png_data, &api_key) {
+                            Ok(analysis) => {
+                                println!("✅ AI analysis complete! Displaying result...");
 
-                            let current_offset = renderer.scroll_offset();
-                            *renderer = Renderer::new(config.clone())
-                                .with_font(font_id, font_ascent, font_descent)
-                                .with_text(format!("🤖 AI Screenshot Analysis:\n\n{}", analysis))
-                                .with_scroll_offset(current_offset);
+                                let current_offset = renderer.scroll_offset();
+                                *renderer = Renderer::new(config.clone())
+                                    .with_font(font_id, font_ascent, font_descent)
+                                    .with_text(format!("🤖 AI Screenshot Analysis:\n\n{}", analysis))
+                                    .with_scroll_offset(current_offset);
 
-                            conn.clear_area(false, win, 0, 0, 0, 0)?;
-                            conn.flush()?;
-                            
-                            // Show overlay with results
-                            if !*visible {
-                                conn.map_window(win)?;
-                                *visible = true;
-                                println!("👁️  Overlay shown with AI analysis");
+                                conn.clear_area(false, win, 0, 0, 0, 0)?;
+                                conn.flush()?;
+                                
+                                // Show overlay with results
+                                if !*visible {
+                                    conn.map_window(win)?;
+                                    *visible = true;
+                                    println!("👁️  Overlay shown with AI analysis");
+                                }
+                                
+                                #[cfg(debug_assertions)]
+                                println!("Debug: Screenshot process completed successfully");
                             }
-                        }
-                        Err(e) => {
-                            println!("{}", e); // Error message is already formatted nicely
+                            Err(e) => {
+                                println!("{}", e); // Error message is already formatted nicely
+                                #[cfg(debug_assertions)]
+                                println!("Debug: Gemini analysis failed: {}", e);
+                            }
                         }
                     },
                     Err(e) => {
                         println!("{}", e); // Error message is already formatted nicely
+                        #[cfg(debug_assertions)]
+                        println!("Debug: API key error: {}", e);
                     }
                 }
             }
             Err(e) => {
                 println!("❌ Screenshot capture failed: {}", e);
+                #[cfg(debug_assertions)]
+                println!("Debug: Screenshot capture error: {}", e);
             }
         }
 
@@ -555,8 +586,61 @@ fn handle_key_event(
         if *visible {
             conn.map_window(win)?;
             conn.flush()?;
+            #[cfg(debug_assertions)]
+            println!("Debug: Overlay restored");
         }
         return Ok(true);
+    }
+    
+    // Debug: Show when S key is pressed but combination doesn't match
+    if keycode == keycode_s {
+        #[cfg(debug_assertions)]
+        println!("Debug: S key pressed but Ctrl+Shift+S not detected");
+        
+        // Check individual modifiers
+        let has_ctrl = shortcut_tracker.ctrl_keycode.map_or(false, |k| pressed_keys.contains(&k));
+        let has_shift = shortcut_tracker.shift_keycode.map_or(false, |k| pressed_keys.contains(&k))
+            || pressed_keys.contains(&50) || pressed_keys.contains(&62);
+            
+        println!("📸 S key detected! Need: Ctrl={}, Shift={}", has_ctrl, has_shift);
+        
+        if !has_ctrl {
+            println!("⚠️  Missing Ctrl! Hold Ctrl+Shift, then press S");
+        } else if !has_shift {
+            println!("⚠️  Missing Shift! Hold Ctrl+Shift, then press S");
+        }
+        
+        // FALLBACK: Simple combination check for testing
+        if has_ctrl && has_shift {
+            println!("🔧 Fallback: Attempting screenshot with simple detection...");
+            
+            // Simple screenshot attempt
+            match capture_screenshot(conn, root, screen_width, screen_height) {
+                Ok(png_data) => {
+                    println!("✅ Fallback screenshot captured ({} bytes)", png_data.len());
+                    
+                    // Simple text display without Gemini for testing
+                    let current_offset = renderer.scroll_offset();
+                    *renderer = Renderer::new(config.clone())
+                        .with_font(font_id, font_ascent, font_descent)
+                        .with_text(format!("📷 Screenshot Test Successful!\n\nCaptured {} bytes at {}x{}\n\nPress Ctrl+Shift+E to toggle overlay", png_data.len(), screen_width, screen_height))
+                        .with_scroll_offset(current_offset);
+
+                    conn.clear_area(false, win, 0, 0, 0, 0)?;
+                    conn.flush()?;
+                    
+                    if !*visible {
+                        conn.map_window(win)?;
+                        *visible = true;
+                        println!("👁️  Overlay shown with screenshot test result");
+                    }
+                }
+                Err(e) => {
+                    println!("❌ Fallback screenshot failed: {}", e);
+                }
+            }
+            return Ok(true);
+        }
     }
 
     // Handle arrow keys (only when visible)
