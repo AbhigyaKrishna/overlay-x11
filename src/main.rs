@@ -2,9 +2,9 @@ mod config;
 mod evdev_monitor;
 mod gemini;
 mod modifier_mapper;
+mod prompt;
 mod renderer;
 mod shortcut_tracker;
-mod prompt;
 
 use std::error::Error;
 use std::sync::Arc;
@@ -223,9 +223,15 @@ fn main() -> Result<(), Box<dyn Error>> {
     // Track last response for restoration when overlay becomes visible
     let mut last_response_content: Option<String> = None;
 
-    // Initial state: visible
+    // Initial state: visible in debug builds, hidden in release builds
+    #[cfg(debug_assertions)]
     let mut visible = true;
-    conn.map_window(win)?;
+    #[cfg(not(debug_assertions))]
+    let mut visible = false;
+
+    if visible {
+        conn.map_window(win)?;
+    }
     conn.flush()?;
 
     #[cfg(debug_assertions)]
