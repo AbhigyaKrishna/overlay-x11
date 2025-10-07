@@ -7,12 +7,6 @@ use x11rb::protocol::xproto::Keycode;
 #[derive(Debug, Clone, PartialEq)]
 enum ShortcutState {
     Idle,
-    ModifiersPressed {
-        ctrl: bool,
-        shift: bool,
-        alt: bool,
-        timestamp: Instant,
-    },
     AwaitingTargetKey {
         ctrl: bool,
         shift: bool,
@@ -108,61 +102,15 @@ impl ShortcutTracker {
 
         match &self.state {
             ShortcutState::Idle => {
-                // Transition to ModifiersPressed if any modifier is held
+                // Transition directly to AwaitingTargetKey if any modifier is held (skip stability check for instant response)
                 if ctrl_pressed || shift_pressed || alt_pressed {
                     #[cfg(debug_assertions)]
                     println!(
-                        "State: Idle → ModifiersPressed (ctrl={}, shift={}, alt={})",
+                        "State: Idle → AwaitingTargetKey (instant, ctrl={}, shift={}, alt={})",
                         ctrl_pressed, shift_pressed, alt_pressed
                     );
 
-                    self.state = ShortcutState::ModifiersPressed {
-                        ctrl: ctrl_pressed,
-                        shift: shift_pressed,
-                        alt: alt_pressed,
-                        timestamp: now,
-                    };
-                }
-            }
-
-            ShortcutState::ModifiersPressed {
-                ctrl,
-                shift,
-                alt,
-                timestamp,
-            } => {
-                // Check if modifiers have been released (go back to idle)
-                if !ctrl_pressed && !shift_pressed && !alt_pressed {
-                    #[cfg(debug_assertions)]
-                    println!("State: ModifiersPressed → Idle (all modifiers released)");
-
-                    self.state = ShortcutState::Idle;
-                    return;
-                }
-
-                // Check if modifier combination has stabilized
-                if ctrl_pressed == *ctrl && shift_pressed == *shift && alt_pressed == *alt {
-                    // Same combination for stability check - transition to awaiting target
-                    if now.duration_since(*timestamp) > Duration::from_millis(10) {
-                        #[cfg(debug_assertions)]
-                        println!("State: ModifiersPressed → AwaitingTargetKey (stable for 10ms)");
-
-                        self.state = ShortcutState::AwaitingTargetKey {
-                            ctrl: ctrl_pressed,
-                            shift: shift_pressed,
-                            alt: alt_pressed,
-                            timestamp: now,
-                        };
-                    }
-                } else {
-                    // Modifier combination changed - update the state
-                    #[cfg(debug_assertions)]
-                    println!(
-                        "State: ModifiersPressed (combination changed: ctrl={}, shift={}, alt={})",
-                        ctrl_pressed, shift_pressed, alt_pressed
-                    );
-
-                    self.state = ShortcutState::ModifiersPressed {
+                    self.state = ShortcutState::AwaitingTargetKey {
                         ctrl: ctrl_pressed,
                         shift: shift_pressed,
                         alt: alt_pressed,
