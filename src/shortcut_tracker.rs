@@ -65,8 +65,8 @@ impl ShortcutTracker {
             alt_keycodes: vec![64, 108],  // Left Alt, Right Alt
             keycode_e: None,
             keycode_q: None,
-            modifier_timeout: Duration::from_millis(800), // Generous timeout
-            debounce_timeout: Duration::from_millis(300), // Prevent rapid triggers
+            modifier_timeout: Duration::from_millis(500), // Responsive timeout
+            debounce_timeout: Duration::from_millis(200), // Prevent rapid triggers
         }
     }
 
@@ -143,9 +143,9 @@ impl ShortcutTracker {
                 // Check if modifier combination has stabilized
                 if ctrl_pressed == *ctrl && shift_pressed == *shift && alt_pressed == *alt {
                     // Same combination for stability check - transition to awaiting target
-                    if now.duration_since(*timestamp) > Duration::from_millis(50) {
+                    if now.duration_since(*timestamp) > Duration::from_millis(30) {
                         #[cfg(debug_assertions)]
-                        println!("State: ModifiersPressed → AwaitingTargetKey (stable for 50ms)");
+                        println!("State: ModifiersPressed → AwaitingTargetKey (stable for 30ms)");
 
                         self.state = ShortcutState::AwaitingTargetKey {
                             ctrl: ctrl_pressed,
@@ -186,10 +186,13 @@ impl ShortcutTracker {
                     return;
                 }
 
-                // Check if modifiers are still pressed
+                // Check if modifiers are still pressed (critical for proper reset)
                 if ctrl_pressed != *ctrl || shift_pressed != *shift || alt_pressed != *alt {
                     #[cfg(debug_assertions)]
-                    println!("State: AwaitingTargetKey → Idle (modifier state changed)");
+                    println!(
+                        "State: AwaitingTargetKey → Idle (modifier changed: ctrl={}->{}, shift={}->{}, alt={}->{})",
+                        ctrl, ctrl_pressed, shift, shift_pressed, alt, alt_pressed
+                    );
 
                     self.state = ShortcutState::Idle;
                     return;

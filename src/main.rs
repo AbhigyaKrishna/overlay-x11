@@ -379,7 +379,7 @@ fn handle_key_event(
         shortcut_tracker.clear_all_keys();
         #[cfg(debug_assertions)]
         println!(
-            "⚠️  Excessive keys detected ({}), performing cleanup",
+            "Warn: Excessive keys detected ({}), performing cleanup",
             pressed_keys.len()
         );
         return Ok(false);
@@ -450,17 +450,17 @@ fn handle_key_event(
 
     // Check for Ctrl+Shift+E (toggle overlay)
     if shortcut_tracker.check_ctrl_shift_e(keycode_e) {
-        println!("✅ Ctrl+Shift+E detected! Toggling overlay...");
+        println!("Ctrl+Shift+E detected! Toggling overlay...");
 
         // FIX 7: Reset states immediately after detection
         shortcut_tracker.reset_modifier_states();
 
         if *visible {
             conn.unmap_window(win)?;
-            println!("👁️  Overlay hidden");
+            println!("Overlay hidden");
         } else {
             conn.map_window(win)?;
-            println!("👁️  Overlay shown");
+            println!("Overlay shown");
         }
         *visible = !*visible;
         conn.flush()?;
