@@ -221,6 +221,12 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     #[cfg(debug_assertions)]
     println!("Debug: Overlay started. Press Ctrl+Shift+E to toggle, Ctrl+Shift+S to screenshot.");
+    
+    println!("=== OVERLAY CONTROLS ===");
+    println!("📋 Toggle Overlay: Hold Ctrl + Shift, then press E");
+    println!("📸 Screenshot + AI: Hold Ctrl + Shift, then press S");
+    println!("🔍 When overlay is visible: Use arrow keys to scroll");
+    println!("========================");
 
     // Event loop - handle both XInput2 raw events and evdev events
     loop {
@@ -359,38 +365,86 @@ fn handle_key_event(
     
     #[cfg(debug_assertions)]
     println!("Debug: Modifier states - ctrl_pressed={}, alt_pressed={}, shift_pressed={}", ctrl_pressed, alt_pressed, shift_pressed);
+    
+    // Show helpful messages when modifiers are pressed
+    if ctrl_pressed && shift_pressed && pressed_keys.len() == 2 {
+        println!("🎯 Ctrl+Shift held! Now press E (toggle) or S (screenshot)");
+    } else if ctrl_pressed && pressed_keys.len() == 1 {
+        println!("⌨️  Ctrl held! Add Shift, then press E or S");
+    } else if shift_pressed && pressed_keys.len() == 1 {
+        println!("⌨️  Shift held! Add Ctrl, then press E or S");
+    }
 
     // Handle Ctrl+Alt+E OR Ctrl+Shift+E (toggle overlay)
     if keycode == keycode_e {
+        println!("🔍 E key detected!");
+        
         #[cfg(debug_assertions)]
         println!("Debug: E key pressed (keycode={}), ctrl={}, alt={}, shift={}", keycode, ctrl_pressed, alt_pressed, shift_pressed);
         
-        if ctrl_pressed && (alt_pressed || shift_pressed) {
-            let combo = if alt_pressed { "Ctrl+Alt+E" } else { "Ctrl+Shift+E" };
+        if ctrl_pressed && shift_pressed {
+            let combo = "Ctrl+Shift+E";
+            println!("✅ {} detected! Toggling overlay...", combo);
+            
             #[cfg(debug_assertions)]
             println!("Debug: {} detected! Toggling overlay visibility", combo);
         
             if *visible {
                 conn.unmap_window(win)?;
+                println!("👁️  Overlay hidden");
                 #[cfg(debug_assertions)]
                 println!("Debug: Overlay hidden");
             } else {
                 conn.map_window(win)?;
+                println!("👁️  Overlay shown");
                 #[cfg(debug_assertions)]
                 println!("Debug: Overlay shown");
             }
             *visible = !*visible;
             conn.flush()?;
             return Ok(());
+        } else if ctrl_pressed && alt_pressed {
+            let combo = "Ctrl+Alt+E";
+            println!("✅ {} detected! Toggling overlay...", combo);
+            
+            #[cfg(debug_assertions)]
+            println!("Debug: {} detected! Toggling overlay visibility", combo);
+        
+            if *visible {
+                conn.unmap_window(win)?;
+                println!("👁️  Overlay hidden");
+                #[cfg(debug_assertions)]
+                println!("Debug: Overlay hidden");
+            } else {
+                conn.map_window(win)?;
+                println!("👁️  Overlay shown");
+                #[cfg(debug_assertions)]
+                println!("Debug: Overlay shown");
+            }
+            *visible = !*visible;
+            conn.flush()?;
+            return Ok(());
+        } else {
+            if ctrl_pressed {
+                println!("⚠️  Ctrl+E detected, but need Shift too! Try: Ctrl+Shift+E");
+            } else if shift_pressed {
+                println!("⚠️  Shift+E detected, but need Ctrl too! Try: Ctrl+Shift+E");
+            } else {
+                println!("ℹ️  E pressed. For toggle: Hold Ctrl+Shift, then press E");
+            }
         }
     }
 
     // Handle Ctrl+Shift+S (screenshot)
     if keycode == keycode_s {
+        println!("📸 S key detected!");
+        
         #[cfg(debug_assertions)]
         println!("Debug: S key pressed (keycode={}), ctrl={}, shift={}", keycode, ctrl_pressed, shift_pressed);
         
         if ctrl_pressed && shift_pressed {
+            println!("✅ Ctrl+Shift+S detected! Taking screenshot and analyzing...");
+            
             #[cfg(debug_assertions)]
             println!("Debug: Ctrl+Shift+S detected! Taking screenshot...");
 
@@ -398,42 +452,62 @@ fn handle_key_event(
             if *visible {
                 conn.unmap_window(win)?;
                 conn.flush()?;
-                std::thread::sleep(Duration::from_millis(50));
+                println!("📷 Hiding overlay for clean screenshot...");
+                std::thread::sleep(Duration::from_millis(100));
             }
 
+            println!("📷 Capturing screenshot...");
+            
             // Capture screenshot
             match capture_screenshot(conn, root, screen_width, screen_height) {
                 Ok(png_data) => {
+                    println!("✅ Screenshot captured ({} bytes)", png_data.len());
+                    
                     #[cfg(debug_assertions)]
                     println!("Debug: Screenshot captured ({} bytes)", png_data.len());
 
+                    println!("🤖 Sending to Gemini AI for analysis...");
+                    
                     match gemini::get_api_key(config.gemini_api_key.clone()) {
                         Ok(api_key) => match gemini::analyze_screenshot_data(&png_data, &api_key) {
                             Ok(analysis) => {
+                                println!("✅ AI analysis complete! Displaying result...");
+                                
                                 #[cfg(debug_assertions)]
                                 println!("Debug: Gemini analysis received");
 
                                 let current_offset = renderer.scroll_offset();
                                 *renderer = Renderer::new(config.clone())
                                     .with_font(font_id, font_ascent, font_descent)
-                                    .with_text(format!("Screenshot Analysis:\n\n{}", analysis))
+                                    .with_text(format!("🤖 AI Screenshot Analysis:\n\n{}", analysis))
                                     .with_scroll_offset(current_offset);
 
                                 conn.clear_area(false, win, 0, 0, 0, 0)?;
                                 conn.flush()?;
+                                
+                                // Show overlay with results
+                                if !*visible {
+                                    conn.map_window(win)?;
+                                    *visible = true;
+                                    println!("👁️  Overlay shown with AI analysis");
+                                }
                             }
                             Err(e) => {
+                                println!("❌ AI analysis failed: {}", e);
                                 #[cfg(debug_assertions)]
                                 eprintln!("Debug: Gemini analysis failed: {}", e);
                             }
                         },
                         Err(e) => {
+                            println!("❌ API key error: {}", e);
+                            println!("💡 Set GEMINI_API_KEY environment variable or add to config");
                             #[cfg(debug_assertions)]
                             eprintln!("Debug: {}", e);
                         }
                     }
                 }
                 Err(e) => {
+                    println!("❌ Screenshot capture failed: {}", e);
                     #[cfg(debug_assertions)]
                     eprintln!("Debug: Screenshot capture failed: {}", e);
                 }
@@ -445,6 +519,14 @@ fn handle_key_event(
                 conn.flush()?;
             }
             return Ok(());
+        } else {
+            if ctrl_pressed {
+                println!("⚠️  Ctrl+S detected, but need Shift too! Try: Ctrl+Shift+S");
+            } else if shift_pressed {
+                println!("⚠️  Shift+S detected, but need Ctrl too! Try: Ctrl+Shift+S");
+            } else {
+                println!("ℹ️  S pressed. For screenshot: Hold Ctrl+Shift, then press S");
+            }
         }
     }
 
