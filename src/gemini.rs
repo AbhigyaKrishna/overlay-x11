@@ -53,18 +53,11 @@ pub fn analyze_screenshot_data(png_data: &[u8], api_key: &str) -> Result<String,
     let base64_image = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, png_data);
 
     // Create the request with a meta prompt
-    let meta_prompt = r#"You are a helpful AI assistant analyzing a screenshot. Please provide a clear, concise answer to help the user understand what they're seeing. 
-
-IMPORTANT INSTRUCTIONS:
-- Keep your response under 200 words for easy reading on screen if not generating code.
-- Be specific and actionable in your analysis
-- If you see text, code, or UI elements, explain what they are and what they do
-- If you see an error or problem, suggest solutions
-- If you see a question or task, provide a helpful answer
-- Format your response with clear sections if needed
-- Use simple, direct language that's easy to read quickly
-
-What do you see in this screenshot and how can you help the user?"#;
+    let meta_prompt = r#"You are an AI assistant answering questions. 
+If the input is a multiple-choice question (MCQ), reply ONLY with the correct option letter (A, B, C, or D) and nothing else.
+If the input is a one-word or short-answer question, reply with a short, crisp answer (just a word or a brief phrase).
+If the input is a longer question, answer as briefly and concisely as possible.
+Never add explanations or extra text. Only give the answer."#;
 
     let request = GeminiRequest {
         contents: vec![Content {
