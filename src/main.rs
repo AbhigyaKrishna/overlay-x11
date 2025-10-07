@@ -220,7 +220,7 @@ fn main() -> Result<(), Box<dyn Error>> {
     conn.flush()?;
 
     #[cfg(debug_assertions)]
-    println!("Debug: Overlay started. Press Ctrl+Alt+E or Ctrl+Shift+E to toggle, Ctrl+Alt+S to screenshot.");
+    println!("Debug: Overlay started. Press Ctrl+Shift+E to toggle, Ctrl+Shift+S to screenshot.");
 
     // Event loop - handle both XInput2 raw events and evdev events
     loop {
@@ -385,14 +385,14 @@ fn handle_key_event(
         }
     }
 
-    // Handle Ctrl+Alt+S (screenshot)
+    // Handle Ctrl+Shift+S (screenshot)
     if keycode == keycode_s {
         #[cfg(debug_assertions)]
-        println!("Debug: S key pressed (keycode={}), ctrl={}, alt={}", keycode, ctrl_pressed, alt_pressed);
+        println!("Debug: S key pressed (keycode={}), ctrl={}, shift={}", keycode, ctrl_pressed, shift_pressed);
         
-        if ctrl_pressed && alt_pressed {
+        if ctrl_pressed && shift_pressed {
             #[cfg(debug_assertions)]
-            println!("Debug: Ctrl+Alt+S detected! Taking screenshot...");
+            println!("Debug: Ctrl+Shift+S detected! Taking screenshot...");
 
             // Temporarily hide overlay if visible
             if *visible {
