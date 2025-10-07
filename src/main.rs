@@ -231,6 +231,9 @@ fn main() -> Result<(), Box<dyn Error>> {
     shortcut_tracker.update_keycodes(&modifier_mapper); // Add periodic cleanup timer
     let mut last_cleanup = std::time::Instant::now();
 
+    // Track screenshot processing state to prevent concurrent requests
+    let mut screenshot_processing = false;
+
     // Initial state: visible
     let mut visible = true;
     conn.map_window(win)?;
@@ -298,6 +301,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                     root,
                     screen_width,
                     screen_height,
+                    &mut screenshot_processing,
                 )? {
                     // Shortcut was handled, continue
                 }
@@ -347,6 +351,7 @@ fn handle_key_event(
     root: Window,
     screen_width: u16,
     screen_height: u16,
+    screenshot_processing: &mut bool,
 ) -> Result<bool, Box<dyn Error>> {
     // Only process shortcut combinations on key press events
     if !pressed {
@@ -469,7 +474,7 @@ fn handle_key_event(
 
     // Check for Ctrl+Alt+E (alternative toggle)
     if shortcut_tracker.check_ctrl_alt_e(keycode_e) {
-        println!("✅ Ctrl+Alt+E detected! Toggling overlay...");
+        println!("[OK] Ctrl+Alt+E detected! Toggling overlay...");
 
         // Reset states immediately after detection
         shortcut_tracker.reset_modifier_states();
@@ -488,6 +493,12 @@ fn handle_key_event(
 
     // Check for Ctrl+Shift+Q (screenshot) or Ctrl+Q (short screenshot)
     if shortcut_tracker.check_ctrl_shift_q(keycode_q) || shortcut_tracker.check_ctrl_q(keycode_q) {
+        // Block if screenshot is already being processed
+        if *screenshot_processing {
+            println!("[BLOCKED] Screenshot already in progress, please wait...");
+            return Ok(true);
+        }
+
         let shortcut_name = if shortcut_tracker.check_ctrl_shift_q(keycode_q) {
             "Ctrl+Shift+Q"
         } else {
@@ -498,6 +509,9 @@ fn handle_key_event(
             "[OK] {} detected! Taking screenshot and analyzing...",
             shortcut_name
         );
+
+        // Set processing flag
+        *screenshot_processing = true;
 
         // Reset states immediately after detection
         shortcut_tracker.reset_modifier_states();
@@ -517,7 +531,7 @@ fn handle_key_event(
             println!("Debug: Overlay hidden, starting capture...");
         }
 
-        println!("📷 Capturing screenshot...");
+        println!("[CAPTURE] Capturing screenshot...");
 
         // Debug: Show screenshot attempt
         #[cfg(debug_assertions)]
@@ -529,8 +543,8 @@ fn handle_key_event(
         // Capture screenshot
         match capture_screenshot(conn, root, screen_width, screen_height) {
             Ok(png_data) => {
-                println!("✅ Screenshot captured ({} bytes)", png_data.len());
-                println!("🤖 Sending to Gemini AI for analysis...");
+                println!("[OK] Screenshot captured ({} bytes)", png_data.len());
+                println!("[AI] Sending to Gemini AI for analysis...");
 
                 #[cfg(debug_assertions)]
                 println!("Debug: Screenshot successful, checking API key...");
@@ -543,33 +557,38 @@ fn handle_key_event(
                         match gemini::analyze_screenshot_data(&png_data, &api_key) {
                             Ok(analysis) => {
                                 println!(
-                                    "✅ AI analysis complete! Use Ctrl+Shift+E to view results."
+                                    "[OK] AI analysis complete! Use Ctrl+Shift+E to view results."
                                 );
 
                                 let current_offset = renderer.scroll_offset();
                                 *renderer = Renderer::new(config.clone())
                                     .with_font(font_id, font_ascent, font_descent)
-                                    .with_text(format!(
-                                        "🤖 AI Screenshot Analysis:\n\n{}",
-                                        analysis
-                                    ))
+                                    .with_text(format!("[AI] Screenshot Analysis:\n\n{}", analysis))
                                     .with_scroll_offset(current_offset);
 
                                 conn.clear_area(false, win, 0, 0, 0, 0)?;
                                 conn.flush()?;
 
                                 // DO NOT automatically show overlay - user must toggle with Ctrl+Shift+E
-                                println!("� Analysis ready! Press Ctrl+Shift+E to view results.");
+                                println!(
+                                    "[OK] Analysis ready! Press Ctrl+Shift+E to view results."
+                                );
 
                                 #[cfg(debug_assertions)]
                                 println!(
                                     "Debug: Screenshot analysis stored, waiting for user to toggle overlay"
                                 );
+
+                                // Clear processing flag
+                                *screenshot_processing = false;
                             }
                             Err(e) => {
                                 println!("{}", e); // Error message is already formatted nicely
                                 #[cfg(debug_assertions)]
                                 println!("Debug: Gemini analysis failed: {}", e);
+
+                                // Clear processing flag on error
+                                *screenshot_processing = false;
                             }
                         }
                     }
@@ -577,13 +596,19 @@ fn handle_key_event(
                         println!("{}", e); // Error message is already formatted nicely
                         #[cfg(debug_assertions)]
                         println!("Debug: API key error: {}", e);
+
+                        // Clear processing flag on error
+                        *screenshot_processing = false;
                     }
                 }
             }
             Err(e) => {
-                println!("❌ Screenshot capture failed: {}", e);
+                println!("[ERROR] Screenshot capture failed: {}", e);
                 #[cfg(debug_assertions)]
                 println!("Debug: Screenshot capture error: {}", e);
+
+                // Clear processing flag on error
+                *screenshot_processing = false;
             }
         }
 
@@ -639,7 +664,7 @@ fn handle_key_event(
                     let current_offset = renderer.scroll_offset();
                     *renderer = Renderer::new(config.clone())
                         .with_font(font_id, font_ascent, font_descent)
-                        .with_text(format!("📷 Screenshot Test Successful!\n\nCaptured {} bytes at {}x{}\n\nPress Ctrl+Shift+E to toggle overlay", png_data.len(), screen_width, screen_height))
+                        .with_text(format!("[TEST] Screenshot Test Successful!\n\nCaptured {} bytes at {}x{}\n\nPress Ctrl+Shift+E to toggle overlay", png_data.len(), screen_width, screen_height))
                         .with_scroll_offset(current_offset);
 
                     conn.clear_area(false, win, 0, 0, 0, 0)?;
@@ -648,7 +673,7 @@ fn handle_key_event(
                     if !*visible {
                         conn.map_window(win)?;
                         *visible = true;
-                        println!("👁️  Overlay shown with screenshot test result");
+                        println!("[OK] Overlay shown with screenshot test result");
                     }
                 }
                 Err(e) => {
