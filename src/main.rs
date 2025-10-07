@@ -54,6 +54,18 @@ impl ShortcutTracker {
         }
     }
     
+    
+    // Add this new method for resetting modifier states
+    fn reset_modifier_states(&mut self) {
+        self.recent_ctrl = None;
+        self.recent_shift = None;
+        self.recent_alt = None;
+        self.last_combo_time = Instant::now();
+        
+        #[cfg(debug_assertions)]
+        println!("Debug: Modifier states reset");
+    }
+    
     fn update_keycodes(&mut self, modifier_mapper: &ModifierMapper) {
         // Get standard modifier keycodes
         self.ctrl_keycode = modifier_mapper.get_keycode(0xffe3).or_else(|| modifier_mapper.get_keycode(0xffe4));
@@ -78,6 +90,9 @@ impl ShortcutTracker {
             return false;
         }
         
+        // FIX 1: Shorter timing window to prevent conflicts
+        let timing_tolerance = Duration::from_millis(150); // Reduced from 300ms
+        
         // Update recent modifier timestamps
         if let Some(ctrl_key) = self.ctrl_keycode {
             if pressed_keys.contains(&ctrl_key) {
@@ -101,22 +116,22 @@ impl ShortcutTracker {
         let mut has_shift = false;
         let mut has_alt = false;
         
-        // Check modifiers with timing tolerance
+        // FIX 2: More precise modifier checking
         if need_ctrl {
             has_ctrl = self.ctrl_keycode.map_or(false, |k| pressed_keys.contains(&k))
-                || self.recent_ctrl.map_or(false, |t| now.duration_since(t) < Duration::from_millis(300));
+                || self.recent_ctrl.map_or(false, |t| now.duration_since(t) < timing_tolerance);
         }
         
         if need_shift {
             has_shift = self.shift_keycode.map_or(false, |k| pressed_keys.contains(&k))
                 || pressed_keys.contains(&50) || pressed_keys.contains(&62)
-                || self.recent_shift.map_or(false, |t| now.duration_since(t) < Duration::from_millis(300));
+                || self.recent_shift.map_or(false, |t| now.duration_since(t) < timing_tolerance);
                 
             #[cfg(debug_assertions)]
             if need_shift {
                 let shift_currently = self.shift_keycode.map_or(false, |k| pressed_keys.contains(&k))
                     || pressed_keys.contains(&50) || pressed_keys.contains(&62);
-                let shift_recent = self.recent_shift.map_or(false, |t| now.duration_since(t) < Duration::from_millis(300));
+                let shift_recent = self.recent_shift.map_or(false, |t| now.duration_since(t) < timing_tolerance);
                 println!("Debug: Shift check - currently={}, recent={}, combined={}", 
                          shift_currently, shift_recent, has_shift);
             }
@@ -124,7 +139,7 @@ impl ShortcutTracker {
         
         if need_alt {
             has_alt = self.alt_keycode.map_or(false, |k| pressed_keys.contains(&k))
-                || self.recent_alt.map_or(false, |t| now.duration_since(t) < Duration::from_millis(300));
+                || self.recent_alt.map_or(false, |t| now.duration_since(t) < timing_tolerance);
         }
         
         // Check if we have the required combination
@@ -138,8 +153,8 @@ impl ShortcutTracker {
         }
         
         if combo_match {
-            // Prevent rapid triggering
-            if now.duration_since(self.last_combo_time) > Duration::from_millis(200) {
+            // FIX 3: Longer debounce time to prevent rapid triggering
+            if now.duration_since(self.last_combo_time) > Duration::from_millis(300) { // Increased from 200ms
                 self.last_combo_time = now;
                 return true;
             }
@@ -353,6 +368,9 @@ fn main() -> Result<(), Box<dyn Error>> {
     // Initialize robust shortcut tracker
     let mut shortcut_tracker = ShortcutTracker::new();
     shortcut_tracker.update_keycodes(&modifier_mapper);
+    
+    // Add periodic cleanup timer
+    let mut last_cleanup = std::time::Instant::now();
 
     // Initial state: visible
     let mut visible = true;
@@ -370,6 +388,16 @@ fn main() -> Result<(), Box<dyn Error>> {
 
     // Event loop - handle both XInput2 raw events and evdev events
     loop {
+        // Periodic cleanup to prevent stuck modifier states (every 5 seconds)
+        if last_cleanup.elapsed() >= Duration::from_secs(5) {
+            key_tracker.cleanup_stale_keys();
+            shortcut_tracker.reset_modifier_states();
+            last_cleanup = std::time::Instant::now();
+            
+            #[cfg(debug_assertions)]
+            println!("Debug: Periodic cleanup performed");
+        }
+        
         // Handle evdev events if available
         if let Some(ref evdev) = evdev_monitor {
             while let Some(ev) = evdev.try_recv() {
@@ -389,7 +417,7 @@ fn main() -> Result<(), Box<dyn Error>> {
                 if handle_key_event(
                     x11_keycode,
                     ev.pressed,
-                    &key_tracker,
+                    &mut key_tracker,
                     &mut shortcut_tracker,
                     keycode_e,
                     keycode_s,
@@ -439,7 +467,7 @@ fn main() -> Result<(), Box<dyn Error>> {
 fn handle_key_event(
     keycode: u8,
     pressed: bool,
-    key_tracker: &KeyStateTracker,
+    key_tracker: &mut KeyStateTracker,
     shortcut_tracker: &mut ShortcutTracker,
     keycode_e: u8,
     keycode_s: u8,
@@ -459,11 +487,31 @@ fn handle_key_event(
     screen_width: u16,
     screen_height: u16,
 ) -> Result<bool, Box<dyn Error>> {
+    // FIX 5: Clear modifier states on key release events
     if !pressed {
+        // Reset modifier tracking when any key is released
+        if keycode == shortcut_tracker.ctrl_keycode.unwrap_or(0) ||
+           keycode == shortcut_tracker.shift_keycode.unwrap_or(0) ||
+           keycode == shortcut_tracker.alt_keycode.unwrap_or(0) {
+            
+            shortcut_tracker.reset_modifier_states();
+            
+            #[cfg(debug_assertions)]
+            println!("Debug: Modifier key released, states reset");
+        }
         return Ok(false);
     }
 
     let pressed_keys = key_tracker.get_pressed_keys();
+    
+    // FIX 6: Force reset if too many keys are detected (stuck state)
+    if pressed_keys.len() > 5 {
+        shortcut_tracker.reset_modifier_states();
+        key_tracker.clear_all_keys();
+        
+        println!("⚠️  Too many keys detected, resetting state");
+        return Ok(false);
+    }
     
     #[cfg(debug_assertions)]
     println!("Debug: Key pressed - keycode={}, E={}, S={}", keycode, keycode_e, keycode_s);
@@ -517,6 +565,9 @@ fn handle_key_event(
     if shortcut_tracker.check_ctrl_shift_e(&pressed_keys, keycode_e) {
         println!("✅ Ctrl+Shift+E detected! Toggling overlay...");
         
+        // FIX 7: Reset states immediately after detection
+        shortcut_tracker.reset_modifier_states();
+        
         if *visible {
             conn.unmap_window(win)?;
             println!("👁️  Overlay hidden");
@@ -533,6 +584,9 @@ fn handle_key_event(
     if shortcut_tracker.check_ctrl_alt_e(&pressed_keys, keycode_e) {
         println!("✅ Ctrl+Alt+E detected! Toggling overlay...");
         
+        // Reset states immediately after detection
+        shortcut_tracker.reset_modifier_states();
+        
         if *visible {
             conn.unmap_window(win)?;
             println!("👁️  Overlay hidden");
@@ -548,6 +602,9 @@ fn handle_key_event(
     // Check for Ctrl+Shift+S (screenshot)
     if shortcut_tracker.check_ctrl_shift_s(&pressed_keys, keycode_s) {
         println!("✅ Ctrl+Shift+S detected! Taking screenshot and analyzing...");
+        
+        // Reset states immediately after detection
+        shortcut_tracker.reset_modifier_states();
         
         // Debug: Show what we're about to do
         #[cfg(debug_assertions)]

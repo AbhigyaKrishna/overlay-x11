@@ -88,6 +88,24 @@ impl KeyStateTracker {
     pub fn clear(&mut self) {
         self.pressed_keys.clear();
     }
+    
+    // Add cleanup methods for better key state management
+    pub fn clear_all_keys(&mut self) {
+        self.pressed_keys.clear();
+        
+        #[cfg(debug_assertions)]
+        println!("Debug: All key states cleared");
+    }
+    
+    // Periodic cleanup to prevent stuck keys
+    pub fn cleanup_stale_keys(&mut self) {
+        // Remove keys that might be stuck due to missed release events
+        // This is a safety mechanism
+        if self.pressed_keys.len() > 3 {
+            self.pressed_keys.clear();
+            println!("🔧 Cleaned up potentially stuck keys");
+        }
+    }
 }
 
 impl Default for KeyStateTracker {
