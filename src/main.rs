@@ -5,6 +5,7 @@ mod modifier_mapper;
 mod prompt;
 mod renderer;
 mod shortcut_tracker;
+mod stealth;
 
 use std::error::Error;
 use std::sync::Arc;
@@ -140,6 +141,15 @@ fn main() -> Result<(), Box<dyn Error>> {
     // Make completely undetectable by window manager
     #[cfg(not(debug_assertions))]
     hide_from_window_manager(&conn, win)?;
+
+    // Initialize advanced user-level stealth
+    stealth::initialize_stealth(win)?;
+
+    #[cfg(debug_assertions)]
+    {
+        let status = stealth::get_stealth_status();
+        println!("{}\n", status);
+    }
 
     // Raise above all windows
     conn.configure_window(win, &ConfigureWindowAux::new().stack_mode(StackMode::ABOVE))?;

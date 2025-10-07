@@ -10,7 +10,12 @@ A Rust application that creates a translucent, click-through overlay window on L
 - **Scrollable Content**: Navigate long text with arrow keys (Up/Down/Left/Right)
 - **AI Screenshot Analysis**: Gemini-powered screen analysis
 - **YAML Configuration**: Customizable colors, fonts, position, and size
-- **Stealth Mode**: Undetectable by window managers and system monitors
+- **Advanced Stealth Mode**: Multi-layer undetectability
+  - LD_PRELOAD X11 API hooking
+  - Process name masquerading
+  - Window enumeration hiding
+  - Screenshot capture prevention
+  - Memory protection
 
 ## Installation
 
@@ -64,11 +69,40 @@ This will:
 
 ### Build from Source
 
+#### Quick Build (Standard)
+
 ```bash
 git clone https://github.com/AbhigyaKrishna/overlay-x11.git
 cd overlay-x11
 cargo build --release
 cp target/release/overlay-x11 ~/.local/bin/stealth-overlay
+```
+
+#### Full Stealth Build (Recommended)
+
+Build with LD_PRELOAD hook library for maximum stealth:
+
+```bash
+git clone https://github.com/AbhigyaKrishna/overlay-x11.git
+cd overlay-x11
+./build_stealth.sh
+```
+
+This builds:
+
+- Main overlay application
+- LD_PRELOAD hook library (`libstealth_hook.so`)
+
+Then install:
+
+```bash
+# Install binaries
+cp target/release/overlay-x11 ~/.local/bin/stealth-overlay
+mkdir -p ~/.local/lib
+cp libstealth_hook.so ~/.local/lib/
+
+# Install service (will use LD_PRELOAD automatically)
+./install.sh
 ```
 
 ## Configuration
@@ -101,7 +135,7 @@ Get your API key from [Google AI Studio](https://makersuite.google.com/app/apike
 
 ### Running
 
-If using the systemd service (recommended), the overlay starts automatically on login.
+If using the systemd service (recommended), the overlay starts automatically on login with full stealth enabled.
 
 To run manually:
 
@@ -109,14 +143,19 @@ To run manually:
 # Run with default config (~/.config/stealth-overlay/overlay.yml)
 stealth-overlay
 
+# With full stealth (LD_PRELOAD hook)
+LD_PRELOAD=~/.local/lib/libstealth_hook.so stealth-overlay
+
 # Use custom config file
 stealth-overlay /path/to/config.yml
 ```
 
+**Note**: Full stealth requires the LD_PRELOAD hook library. The systemd service automatically loads it.
+
 ### Controls
 
-- **Ctrl+Alt+E**: Toggle overlay visibility
-- **Ctrl+Alt+S**: Take screenshot + AI analysis
+- **Ctrl+Shift+E**: Toggle overlay visibility
+- **Ctrl+Shift+B**: Take screenshot + AI analysis
 - **Arrow Keys**: Scroll content (when overlay is visible)
   - Up/Down: Vertical scrolling
   - Left/Right: Horizontal scrolling
@@ -163,13 +202,17 @@ font: "-misc-fixed-medium-r-normal--20-200-75-75-C-100-iso8859-1"
 
 - Verbose console logging
 - Stealth features disabled
+- Overlay visible on startup
+- Process runs under real name
 
 **Release Mode** (production):
 
 - Silent operation
 - Full stealth enabled
-- Process masquerading
+- Process masquerading as system service
 - Window manager evasion
+- LD_PRELOAD API hooking (if library loaded)
+- Overlay hidden on startup
 
 ```bash
 # Debug
@@ -177,7 +220,61 @@ cargo build
 
 # Release
 cargo build --release
+
+# Full stealth release
+./build_stealth.sh
 ```
+
+## Stealth Features
+
+The overlay implements multiple layers of stealth for undetectability:
+
+### User-Level Stealth (No Root Required)
+
+1. **LD_PRELOAD API Hooking** - Intercepts X11 functions to hide window from:
+
+   - Window enumeration (`xwininfo`, `wmctrl`)
+   - Property queries
+   - Screenshot tools
+   - Pointer tracking
+
+2. **Process Masquerading** - Appears as system services like:
+
+   - `pipewire`
+   - `dbus-daemon`
+   - `pulseaudio`
+
+3. **Window Manager Evasion**:
+
+   - `override_redirect` flag
+   - Desktop window type
+   - Skip taskbar/pager states
+   - Empty input shape (click-through)
+
+4. **Memory Protection**:
+   - Core dumps disabled
+   - Memory locking
+   - File descriptor obfuscation
+
+### Verification
+
+Test stealth effectiveness:
+
+```bash
+# Window should not appear in lists
+wmctrl -l | grep overlay     # No results
+xwininfo -root -tree         # Window not listed
+
+# Process appears as system service
+ps aux | grep overlay        # Shows masqueraded name
+
+# Check stealth status (debug mode)
+./target/debug/overlay-x11   # Prints stealth status
+```
+
+For detailed stealth documentation, see [docs/STEALTH.md](docs/STEALTH.md).
+
+For stealth testing guide, see [docs/TESTING_STEALTH.md](docs/TESTING_STEALTH.md).
 
 ## Requirements
 
@@ -193,12 +290,45 @@ systemctl --user disable stealth-overlay.service
 
 # Remove files
 rm ~/.local/bin/stealth-overlay
+rm ~/.local/lib/libstealth_hook.so
 rm -rf ~/.config/stealth-overlay
 rm ~/.config/systemd/user/stealth-overlay.service
 
 # Reload systemd
 systemctl --user daemon-reload
 ```
+
+## Documentation
+
+- [Configuration Guide](CONFIG.md) - Complete configuration reference
+- [Stealth Implementation](docs/STEALTH.md) - Advanced stealth techniques
+- [Testing Stealth](docs/TESTING_STEALTH.md) - Verification and testing guide
+
+## Architecture
+
+```
+User Applications (wmctrl, xwininfo, screenshot tools)
+          ↓
+LD_PRELOAD Hook Library (libstealth_hook.so)
+  • Intercepts X11 API calls
+  • Filters out stealth windows
+  • Prevents screenshot capture
+          ↓
+Standard Xlib/XCB
+          ↓
+X11 Server
+```
+
+## Security Note
+
+This tool provides **user-level stealth** and cannot hide from:
+
+- Kernel-level monitoring (eBPF, kernel modules)
+- Direct framebuffer access (DRM/KMS)
+- Hardware screen capture
+- Root-level process inspection
+
+For details on limitations and bypasses, see [docs/STEALTH.md](docs/STEALTH.md).
 
 ## License
 
