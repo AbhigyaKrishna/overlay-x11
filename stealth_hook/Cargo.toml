@@ -10,8 +10,6 @@ crate-type = ["cdylib"]
 [dependencies]
 libc = "0.2"
 lazy_static = "1.4"
-redhook = "2.0"
-x11 = "2.21"
 
 [profile.release]
 opt-level = 3
