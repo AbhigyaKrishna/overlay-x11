@@ -1,0 +1,1 @@
+LD_PRELOAD=./libstealth_hook.so ./target/release/overlay-x11
