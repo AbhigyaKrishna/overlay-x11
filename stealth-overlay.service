@@ -4,12 +4,11 @@ After=graphical-session.target
 
 [Service]
 Type=simple
-ExecStart=%h/.local/bin/stealth-overlay %h/.config/stealth-overlay/overlay.yml
+ExecStart=/bin/bash -c 'if [ -f "%h/.local/lib/libstealth_hook.so" ]; then LD_PRELOAD="%h/.local/lib/libstealth_hook.so" "%h/.local/bin/stealth-overlay" "%h/.config/stealth-overlay/overlay.yml"; else "%h/.local/bin/stealth-overlay" "%h/.config/stealth-overlay/overlay.yml"; fi'
 Restart=always
 RestartSec=5
 Environment=DISPLAY=:0
 Environment=XAUTHORITY=%h/.Xauthority
-Environment=LD_PRELOAD=%h/.local/lib/libstealth_hook.so
 
 # Security settings - relaxed for LD_PRELOAD compatibility
 PrivateTmp=true
