@@ -119,7 +119,7 @@ pub extern "C" fn XQueryTree(
                 if filtered.len() < nchildren {
                     // Allocate new memory for filtered list
                     let new_children =
-                        libc::malloc(filtered.len() * std::mem::size_of::<Window>()) as *mut Window;
+                        libc::calloc(filtered.len(), std::mem::size_of::<Window>()) as *mut Window;
                     if !new_children.is_null() {
                         for (i, &child) in filtered.iter().enumerate() {
                             *new_children.add(i) = child;
