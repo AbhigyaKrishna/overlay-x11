@@ -11,11 +11,8 @@ Environment=DISPLAY=:0
 Environment=XAUTHORITY=%h/.Xauthority
 Environment=LD_PRELOAD=%h/.local/lib/libstealth_hook.so
 
-# Security settings
-NoNewPrivileges=true
+# Security settings - relaxed for LD_PRELOAD compatibility
 PrivateTmp=true
-ProtectSystem=strict
-ProtectHome=read-only
 
 [Install]
 WantedBy=default.target
