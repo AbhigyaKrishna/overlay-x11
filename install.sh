@@ -19,6 +19,12 @@ if [ -z "$BINARY_URL" ]; then
     exit 1
 fi
 
+if [ -z "$HOOK_URL" ]; then
+    echo "Error: Could not find stealth hook library in latest release"
+    echo "Please check https://github.com/${REPO}/releases"
+    exit 1
+fi
+
 VERSION=$(echo "$LATEST_RELEASE" | grep -oP '"tag_name":\s*"\K[^"]+')
 echo "Downloading ${BINARY_NAME} ${VERSION}..."
 
@@ -30,14 +36,10 @@ curl -L -o ~/.local/bin/${INSTALL_NAME} "$BINARY_URL"
 chmod +x ~/.local/bin/${INSTALL_NAME}
 echo "✓ Binary installed to ~/.local/bin/${INSTALL_NAME}"
 
-# Download stealth hook library if available
-if [ -n "$HOOK_URL" ]; then
-    curl -L -o ~/.local/lib/libstealth_hook.so "$HOOK_URL"
-    chmod +x ~/.local/lib/libstealth_hook.so
-    echo "✓ Stealth hook library installed to ~/.local/lib/libstealth_hook.so"
-else
-    echo "⚠ Stealth hook library not found in release - stealth features will be limited"
-fi
+# Download stealth hook library (required)
+curl -L -o ~/.local/lib/libstealth_hook.so "$HOOK_URL"
+chmod +x ~/.local/lib/libstealth_hook.so
+echo "✓ Stealth hook library installed to ~/.local/lib/libstealth_hook.so"
 
 echo "Downloading configuration files..."
 mkdir -p ~/.config/stealth-overlay
@@ -72,14 +74,10 @@ echo "  Status:  systemctl --user status stealth-overlay.service"
 echo "  Logs:    journalctl --user -u stealth-overlay.service -f"
 echo ""
 echo "Stealth Features:"
-if [ -f ~/.local/lib/libstealth_hook.so ]; then
-    echo "  ✓ LD_PRELOAD hook library installed (advanced stealth enabled)"
-    echo "  ✓ Window enumeration hiding"
-    echo "  ✓ Screenshot capture prevention"
-    echo "  ✓ Process name masquerading"
-else
-    echo "  ⚠ Basic stealth only (hook library not installed)"
-fi
+echo "  ✓ LD_PRELOAD hook library installed (advanced stealth enabled)"
+echo "  ✓ Window enumeration hiding"
+echo "  ✓ Screenshot capture prevention"
+echo "  ✓ Process name masquerading"
 echo ""
 echo "Hotkeys:"
 echo "  Ctrl+Shift+E - Toggle overlay visibility"
